@@ -13,7 +13,7 @@ const Seifert = {};
 
 // ------------------------------------------------------------------ braid words
 // Accepted: integer lists "1 2 -1 2", "[1,2,-1,2]"; sigma words "s1 s2 s1^-1", "σ1σ2σ1⁻¹", "σ_1^3"; letters "abA"
-// (a = σ1, A = σ1^-1); groups with powers "(1 2)^5"; torus links "T(3,5)"; a table name ("3_1", "12n242", "L6a4")
+// (a = σ1, A = σ1^-1: the reverse of SeifertView's case); groups with powers "(1 2)^5"; torus links "T(3,5)"; a table name ("3_1", "12n242", "L6a4")
 // or an alias ("trefoil") is returned as { name } for the app to look up.
 const SUP = { '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4', '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9', '⁻': '-' };
 const ALIASES = {

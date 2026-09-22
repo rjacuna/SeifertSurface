@@ -150,15 +150,42 @@ produces. Nothing here competes with it; the point is a browser, a braid word, a
 ## van Wijk's SeifertView
 
 Jarke van Wijk and Arjeh Cohen made the two papers and the program this project starts from: *Visualization of the
-genus of knots* (IEEE Visualization 2005) and *Visualization of Seifert surfaces* (IEEE Transactions on Visualization
-and Computer Graphics 12(4), 2006), implemented in SeifertView, a Windows program with a braid-word input and a very
-good renderer. Their construction is the same Seifert-circles-as-disks, crossings-as-twisted-bands one, done for
-general knot diagrams (nested circles at different heights, bands routed between them) and then made smooth and
-pleasant to look at, with the surface's two sides in two colors to show its orientability, and the genus counted
-from the diagram. The surface is a topological object, and theirs is a good picture of it. What can be done better is
-to give it a canonical geometry once the wire is chosen: the soap film. That geometry is not a matter of taste, it is
-the solution of an elliptic boundary value problem, and it makes the disks-and-bands scaffolding disappear into a
-smooth surface that a physical wire would actually carry. Their pictures remain the model for the rendering.
+genus of knots* (IEEE Visualization 2005, 567–574) and its extended version *Visualization of Seifert surfaces*
+(IEEE TVCG 12(4), 2006, 485–496), implemented in SeifertView, a Windows-only executable, free for personal use, no
+source, with a braid-word input (letters: uppercase a right-hand crossing, and a table of the knots through 10
+crossings from Gittings' minimum braids). Their construction, in its default "stacked" style, is the one above: one
+coaxial disk per strand along the braid axis, a twisted band per crossing stepping round the axis; three other styles
+(split, flat, reduced) route the closure differently so that nested Seifert circles become two stacks or one plane.
+Disks are ellipsoids with elliptical holes where bands attach, bands are Bézier tubes with a rotating frame, and the
+knot is read off the mesh afterwards as the seam between the two sides.
+
+They considered the soap film. Section 2.4 of both papers weighs treating the Seifert surface as a minimal surface
+bounded by the knot and sets it aside: it needs a 3D embedding of the knot, a starting mesh of the right topology,
+and an iterative, compute-intensive minimisation, whereas they wanted a deterministic construction from the abstract
+braid. What they do instead is Catmull–Clark subdivision and vertex averaging (2005, with the remark that the
+averaging "more or less" approaches a minimal surface, and a correction for the tubes it thins), and in 2006 the
+physically based relaxation of Scharein's KnotPlot: the knot's vertices as point masses with a generalised Hooke
+attraction between neighbours and an inverse-power repulsion between all others, the surface's vertices with the
+attraction only, so the surface follows the knot (a steel rod and a rubber sheet, in their words), damped explicit
+Euler with a decaying step, self-intersection of the knot prevented by rejecting close approaches. They say plainly
+that this gives a smooth surface, not a minimal one, that the surface is not checked for self-intersection, and that
+different starting styles relax to different results. Seifert surfaces from an arbitrary given 3D curve, and
+minimal-genus surfaces, are their listed future work; the genus question was taken up by van Garderen and van Wijk
+(Bridges 2013), who search braid moves for a minimal-genus presentation.
+
+So the two objections to the soap film are exactly what this project supplies: the 3D embedding and the starting mesh
+are the Bennequin surface itself, and the minimisation is one sparse linear solve per round, fast enough for a
+browser. Their pictures remain the model for the rendering, and their letter convention is the reverse of the one
+here (`a` is `σ₁`, `A` its inverse), so a SeifertView word is typed with its case swapped.
+
+Soap films on knotted wires have been computed before, with Brakke's Surface Evolver: Brakke's own page *Soap films
+on knots* has Evolver files for the trefoil and the figure-eight, the orientable films among them being numerically
+computed minimal Seifert surfaces, beside Möbius films and films with triple lines; Coletti (Bridges 2024) does torus
+knots and links and notes three distinct stable films on the trefoil; Stockrahm, Lahtinen, Kangas and Kotiuga (2019)
+compute cut surfaces for Almgren–Thurston unknots by finite elements. Wang and Chern (SIGGRAPH 2021) minimise area
+over *all* topologies at once, the boundary as a current and the problem convex, which is the way to compute the
+Hardt–Simon minimiser itself rather than the minimal surface in one isotopy class; Parks (1992) and Brakke (1995) are
+the theory of soap-film-like surfaces on knots.
 
 ## Lehmer's polynomial
 
@@ -205,6 +232,7 @@ the residual falls).
 * **Diagrams as input.** PD and DT codes through `braid.sage` (SnapPy's Vogel algorithm), as `SkeinA/data/braids.txt`
   already does for the census.
 * **A self-intersection check** during the flow, and isotropic remeshing (edge split and collapse) beside the flips.
+* **The global minimiser.** Wang–Chern's minimal currents for the area-minimising surface over all topologies, to compare with the fixed-topology one: when they differ, the wire's least-area surface is not the Bennequin surface's isotopy class.
 * **Export** of the relaxed mesh (OBJ/STL) for printing, and GitHub Pages as for EllipticCurve3D.
 
 ## References
@@ -212,11 +240,18 @@ the residual falls).
 * [AT1977] F. J. Almgren, W. P. Thurston, *Examples of unknotted curves which bound only surfaces of high genus within their convex hulls*, Ann. of Math. 105 (1977) 527–538.
 * [Ben1983] D. Bennequin, *Entrelacements et équations de Pfaff*, Astérisque 107–108 (1983) 87–161.
 * [Bra1992] K. A. Brakke, *The Surface Evolver*, Experiment. Math. 1 (1992) 141–165.
-* [Col2013] J. Collins, *An algorithm for computing the Seifert matrix of a link from a braid representation* (the algorithm Sage implements; cited there as [Col2013]).
+* [Col2013] J. Collins, *An algorithm for computing the Seifert matrix of a link from a braid representation*, 2007, corrected 2013 (the algorithm Sage implements), https://webhomes.maths.ed.ac.uk/~v1ranick/papers/collinsseifert.pdf
 * [HS1979] R. Hardt, L. Simon, *Boundary regularity and embedded solutions for the oriented Plateau problem*, Ann. of Math. 110 (1979) 439–486.
 * [Hir2001] E. Hironaka, *The Lehmer polynomial and pretzel links*, Canad. Math. Bull. 44 (2001) 440–451.
 * [Jos1986] J. Jost, *Existence results for embedded minimal surfaces of controlled topological type*, I–III, Ann. Scuola Norm. Sup. Pisa 13 (1986) 15–50, 401–426; 14 (1987) 165–167.
 * [PP1993] U. Pinkall, K. Polthier, *Computing discrete minimal surfaces and their conjugates*, Experiment. Math. 2 (1993) 15–36.
 * [Tay1976] J. E. Taylor, *The structure of singularities in soap-bubble-like and soap-film-like minimal surfaces*, Ann. of Math. 103 (1976) 489–539.
-* J. J. van Wijk, A. M. Cohen, *Visualization of the genus of knots*, IEEE Visualization 2005, 567–574; *Visualization of Seifert surfaces*, IEEE TVCG 12 (2006) 485–496. SeifertView: https://www.win.tue.nl/~vanwijk/seifertview/
+* J. J. van Wijk, A. M. Cohen, *Visualization of the genus of knots*, IEEE Visualization 2005, 567–574 (doi 10.1109/VISUAL.2005.1532843); *Visualization of Seifert surfaces*, IEEE TVCG 12 (2006) 485–496 (doi 10.1109/TVCG.2006.83). SeifertView: https://vanwijk.win.tue.nl/seifertview/
+* M. van Garderen, J. J. van Wijk, *Seifert surfaces with minimal genus*, Bridges 2013, 453–456.
+* K. A. Brakke, *Soap films on knots*, https://kenbrakke.com/knots/ ; *Soap films and covering spaces*, J. Geom. Anal. 5 (1995) 445–514.
+* H. R. Parks, *Soap-film-like minimal surfaces spanning knots*, J. Geom. Anal. 2 (1992) 267–290.
+* C. Coletti, *Volume-enclosing minimal surfaces of torus knots and links*, Bridges 2024, 463–466.
+* A. Stockrahm, V. Lahtinen, J. J. J. Kangas, P. R. Kotiuga, *Cuts for 3-D magnetic scalar potentials: visualizing unintuitive surfaces arising from trivial knots*, Comput. Math. Appl. 78 (2019) 3200–3210.
+* S. Wang, A. Chern, *Computing minimal surfaces with differential forms*, ACM Trans. Graph. 40(4) (2021) 113.
+* T. Ekholm, B. White, D. Wienholtz, *Embeddedness of minimal surfaces with total boundary curvature at most 4π*, Ann. of Math. 155 (2002) 209–234.
 * KnotInfo (C. Livingston, A. H. Moore), https://knotinfo.math.indiana.edu; LinkInfo; SnapPy (M. Culler, N. Dunfield, M. Goerner, J. Weeks).
