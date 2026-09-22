@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Seifert Surface</title>
+<link rel="stylesheet" href="css/katex/katex.min.css">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<div id="view"></div>
+<div id="topbar">
+  <input id="input" type="text" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="braid word (1 2 -1 2, s1 s2 s1^-1 s2, (1 2)^5), torus link T(3,5), or a knot (3_1, 12n242, trefoil, L6a4)">
+  <button id="build" class="primary">Build</button>
+  <select id="examples" title="Examples"><option value="">Examples…</option></select>
+  <div id="flowbar">
+    <button id="run" type="button" class="primary" aria-label="run or pause the relaxation">▶ Relax</button>
+    <button id="step-once" type="button">Step</button>
+    <button id="reset-surface" type="button" title="Back to the stacked disks and bands">Reset</button>
+    <span class="lbl">iteration</span><span id="v-iter" class="val">0</span>
+    <span class="lbl">area</span><span id="v-area" class="val">–</span>
+    <span class="lbl" title="root mean square of the discrete mean curvature |H| over the interior vertices, times the disk radius">rms <span class="tex">|H|</span></span><span id="v-h" class="val">–</span>
+    <span class="lbl" title="largest vertex displacement in the last round, in disk radii">moved</span><span id="v-moved" class="val">–</span>
+  </div>
+  <div id="info"></div>
+</div>
+<aside id="drawer" aria-label="Options">
+  <div class="tabs">
+    <button class="tab" type="button" data-section="surface" aria-controls="section-surface" aria-expanded="false">Surface</button>
+    <button class="tab" type="button" data-section="flow" aria-controls="section-flow" aria-expanded="false">Flow</button>
+    <button class="tab" type="button" data-section="display" aria-controls="section-display" aria-expanded="false">Display</button>
+  </div>
+  <div id="panel">
+    <section id="section-surface">
+      <h3>The starting surface</h3>
+      <p class="help">One disk per strand, stacked along the braid axis, one half-twisted band per crossing: the Bennequin surface of the closed braid. Its boundary is the wire, which never moves again.</p>
+      <label>Disk spacing (× radius) <span class="val" id="v-spacing"></span><input id="spacing" type="range" min="0.15" max="1.2" step="0.05"></label>
+      <label title="At most 0.8 of the sector between crossings">Band width (× spacing) <span class="val" id="v-bandwidth"></span><input id="bandwidth" type="range" min="0.3" max="3" step="0.1"></label>
+      <label>Band bulge (× band width) <span class="val" id="v-bulge"></span><input id="bulge" type="range" min="0.5" max="2" step="0.1"></label>
+      <label>Rim points <span class="val" id="v-angular"></span><input id="angular" type="range" min="48" max="400" step="8"></label>
+      <label title="The corners of the boundary polygon are rounded at this radius (binomial smoothing, then equal spacing) before it is fixed">Wire rounding (× radius) <span class="val" id="v-round"></span><input id="round" type="range" min="0" max="0.3" step="0.01"></label>
+      <div class="row"><button id="rebuild">Rebuild</button></div>
+    </section>
+    <section id="section-flow" hidden>
+      <h3>Relaxation</h3>
+      <p class="help">Each round freezes the metric of the mesh and solves the Laplace equation <span class="tex">\Delta x = 0</span> for the interior vertices with the wire as boundary data (Pinkall–Polthier); with a finite step it is implicit mean curvature flow. The area decreases every round; the fixed point is the discrete minimal surface.</p>
+      <label title="∞ is the harmonic step; smaller steps are mean curvature flow with dt = step × (mean edge length)²">Step (× mean edge²) <span class="val" id="v-dt"></span><input id="dt" type="range" min="-1" max="3.1" step="0.1"></label>
+      <label title="Flip interior edges to the intrinsic Delaunay triangulation after each round">Delaunay edge flips <input id="flips" type="checkbox"></label>
+      <label title="Move each interior vertex a fraction of the way to the centroid of its neighbours, within the tangent plane">Tangential smoothing <span class="val" id="v-tangential"></span><input id="tangential" type="range" min="0" max="0.8" step="0.05"></label>
+      <label>Rounds per tick <span class="val" id="v-perframe"></span><input id="perframe" type="range" min="1" max="10" step="1"></label>
+      <label title="Stop when the area decreased by less than this fraction of itself over the last five rounds">Stop when the area change &lt; <span class="val" id="v-stop"></span><input id="stop" type="range" min="-10" max="-3" step="0.5"></label>
+    </section>
+    <section id="section-display" hidden>
+      <h3>Display</h3>
+      <label>Coloring <select id="coloring"><option value="sides">two sides</option><option value="parts">disks and bands</option><option value="curvature">mean curvature</option></select></label>
+      <label>Opacity <span class="val" id="v-opacity"></span><input id="opacity" type="range" min="0.05" max="1" step="0.05"></label>
+      <label>Wireframe <input id="wireframe" type="checkbox"></label>
+      <h3>Show</h3>
+      <label>The wire (the knot) <input id="wire" type="checkbox"></label>
+      <label>Wire thickness (× radius) <span class="val" id="v-thick"></span><input id="thick" type="range" min="0.005" max="0.06" step="0.005"></label>
+      <label title="The starting surface, as a faint wireframe">Starting surface <input id="ghost" type="checkbox"></label>
+      <label>Axes <input id="axes" type="checkbox"></label>
+      <div class="row"><button id="reset-view">Reset view</button><button id="snapshot">PNG</button><button id="share">Copy link</button></div>
+    </section>
+  </div>
+</aside>
+<div id="remarks" hidden></div>
+<div id="hint">Drag to rotate · scroll or pinch to zoom · right-drag or two fingers to pan</div>
+<div id="busy" hidden>computing…</div>
+<script src="js/vendor/three.min.js"></script>
+<script src="js/vendor/OrbitControls.js"></script>
+<script src="js/vendor/katex.min.js"></script>
+<script src="js/seifert.js"></script>
+<script src="js/minimal.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
