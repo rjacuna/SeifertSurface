@@ -92,12 +92,20 @@ Minimal.meanCurvature = meanCurvature;
 
 // ------------------------------------------------------------------ the elliptic solve
 // Solve (M/dt + L) x = M x0/dt + (boundary terms) for the interior vertices, x prescribed on the fixed vertices.
-// `target` (3V) holds the prescribed values on the fixed vertices and, on the interior, x0 and the warm start.
-// dt = Infinity is the harmonic problem L x = 0.  Returns { x (3V: the solution on the interior, target on the
+// `target` (D·V, D = opts.dims or 3) holds the prescribed values on the fixed vertices and, on the interior, x0 and
+// the warm start.  dt = Infinity is the harmonic problem L x = 0.  With opts.positive the cotangent weights are
+// clamped at 0 (a convex-combination map, which obeys the maximum principle and cannot fold, at the price of no
+// longer being the exact discrete minimal surface).  Returns { x (the solution on the interior, target on the
 // boundary), iterations, residual }.
 function solve(mesh, target, opts = {}) {
-  const dt = opts.dt === undefined ? Infinity : opts.dt, invdt = dt === Infinity ? 0 : 1 / dt;
+  const dt = opts.dt === undefined ? Infinity : opts.dt, invdt = dt === Infinity ? 0 : 1 / dt, D = opts.dims || 3;
   const T = mesh.topo, V = T.V, { w, mass } = weights(mesh), out = Float64Array.from(target);
+  if (opts.positive) for (let e = 0; e < w.length; e++) if (w[e] < 0) w[e] = 0;
+  if (invdt > 0) {                                     // a floor on the mass: a vertex with a tiny area moves like the others, not at infinite speed
+    let mean = 0, n = 0; for (let v = 0; v < V; v++) if (!mesh.fixed[v]) { mean += mass[v]; n++; }
+    const floor = (opts.massFloor === undefined ? 0.1 : opts.massFloor) * (n ? mean / n : 0);
+    for (let v = 0; v < V; v++) if (mass[v] < floor) mass[v] = floor;
+  }
   const idx = new Int32Array(V).fill(-1); let n = 0;
   for (let v = 0; v < V; v++) if (!mesh.fixed[v]) idx[v] = n++;
   if (!n) return { x: out, iterations: 0, residual: 0 };
@@ -118,10 +126,10 @@ function solve(mesh, target, opts = {}) {
   let iterations = 0, residual = 0;
   const x = new Float64Array(n), b = new Float64Array(n), r = new Float64Array(n), z = new Float64Array(n), q = new Float64Array(n), d = new Float64Array(n);
   const pre = new Float64Array(n); for (let i = 0; i < n; i++) pre[i] = 1 / Math.max(diag[i], 1e-12);
-  for (let c = 0; c < 3; c++) {
+  for (let c = 0; c < D; c++) {
     for (let i = 0; i < n; i++) {
-      const v = verts[i]; x[i] = target[3 * v + c]; let s = mass[v] * invdt * target[3 * v + c];
-      for (let k = T.start[v]; k < T.start[v + 1]; k++) { const j = T.nbr[k]; if (idx[j] < 0) s += w[T.nbrEdge[k]] * target[3 * j + c]; }
+      const v = verts[i]; x[i] = target[D * v + c]; let s = mass[v] * invdt * target[D * v + c];
+      for (let k = T.start[v]; k < T.start[v + 1]; k++) { const j = T.nbr[k]; if (idx[j] < 0) s += w[T.nbrEdge[k]] * target[D * j + c]; }
       b[i] = s;
     }
     // preconditioned conjugate gradients from the warm start
@@ -139,7 +147,7 @@ function solve(mesh, target, opts = {}) {
       for (let i = 0; i < n; i++) d[i] = z[i] + beta * d[i];
     }
     iterations = Math.max(iterations, it); residual = Math.max(residual, rn / bnorm);
-    for (let i = 0; i < n; i++) out[3 * verts[i] + c] = x[i];
+    for (let i = 0; i < n; i++) out[D * verts[i] + c] = x[i];
   }
   return { x: out, iterations, residual };
 }
@@ -148,16 +156,20 @@ Minimal.solve = solve;
 // Returns { iterations, residual, moved } (the largest vertex displacement).
 function step(mesh, opts = {}) {
   const r = solve(mesh, mesh.pos, opts), p = mesh.pos; let moved = 0;
-  for (let i = 0; i < p.length; i++) { moved = Math.max(moved, Math.abs(r.x[i] - p[i])); p[i] = r.x[i]; }
+  for (let i = 0; i < p.length; i++) moved = Math.max(moved, Math.abs(r.x[i] - p[i]));
+  // a solve that did not converge, or ran away, is not applied
+  if (!(r.residual < (opts.maxResidual || 1e-4)) || !isFinite(moved) || (opts.maxMove && moved > opts.maxMove)) return { iterations: r.iterations, residual: r.residual, moved, failed: true };
+  p.set(r.x);
   return { iterations: r.iterations, residual: r.residual, moved };
 }
 Minimal.step = step;
 // Carry the surface along with a displacement of the wire, as a rubber sheet: the harmonic extension of the
-// boundary displacement `disp` (3V, read on the fixed vertices) is added to every vertex.
+// boundary displacement `disp` (3V, read on the fixed vertices) is added to every vertex, with positive weights so
+// that no interior vertex moves further than the wire does.
 function extend(mesh, disp, opts = {}) {
   const target = new Float64Array(disp.length);
   for (let v = 0; v < mesh.fixed.length; v++) if (mesh.fixed[v]) for (let c = 0; c < 3; c++) target[3 * v + c] = disp[3 * v + c];
-  const r = solve(mesh, target, Object.assign({ dt: Infinity }, opts)), p = mesh.pos; let moved = 0;
+  const r = solve(mesh, target, Object.assign({ dt: Infinity, positive: true }, opts)), p = mesh.pos; let moved = 0;
   for (let i = 0; i < p.length; i++) { moved = Math.max(moved, Math.abs(r.x[i])); p[i] += r.x[i]; }
   return { iterations: r.iterations, residual: r.residual, moved };
 }
@@ -239,6 +251,138 @@ function relax(mesh, opts = {}) {
   return Object.assign(s, { flips, area: area(mesh) });
 }
 Minimal.relax = relax;
+
+// Isotropic remeshing (Botsch-Kobbelt) towards the edge length `target`: interior edges longer than 4/3 target are
+// split at their midpoint, interior edges shorter than 4/5 target are collapsed (never two boundary vertices, and
+// the survivor is the boundary one if there is one; the link condition, no other boundary neighbour of the vertex
+// that goes, and no incident triangle turning over), then the flips and the tangential smoothing.  The boundary
+// polygon is untouched.  Vertices are renumbered; the returned `map` (old index -> new, or -1) lets the caller
+// renumber anything that refers to vertices.  Extra per-vertex arrays named in `mesh.attrs` (e.g. kind) follow.
+function remesh(mesh, target, opts = {}) {
+  const high = 4 / 3 * target, low = 4 / 5 * target, attrs = mesh.attrs || ['kind'];
+  let pos = Array.from(mesh.pos), fixed = Array.from(mesh.fixed), tri = Array.from(mesh.tri);
+  const extra = {}; for (const a of attrs) if (mesh[a]) extra[a] = Array.from(mesh[a]);
+  const len = (a, b) => Math.hypot(pos[3 * a] - pos[3 * b], pos[3 * a + 1] - pos[3 * b + 1], pos[3 * a + 2] - pos[3 * b + 2]);
+  let splits = 0, collapses = 0;
+  // ---- splits
+  {
+    let T = topology(Uint32Array.from(tri), pos.length / 3);
+    const order = []; for (let e = 0; e < T.E; e++) if (!T.boundaryEdge[e]) { const l = len(T.ea[e], T.eb[e]); if (l > high) order.push([l, e]); }
+    order.sort((x, y) => y[0] - x[0]);
+    const faceOf = new Map(); const V0 = pos.length / 3;
+    for (let f = 0; f < T.F; f++) for (let k = 0; k < 3; k++) faceOf.set(tri[3 * f + k] * V0 + tri[3 * f + (k + 1) % 3], f);
+    const dirty = new Uint8Array(T.F);
+    for (const [, e] of order) {
+      const a = T.ea[e], b = T.eb[e], f1 = faceOf.get(a * V0 + b), f2 = faceOf.get(b * V0 + a);
+      if (f1 === undefined || f2 === undefined || dirty[f1] || dirty[f2]) continue;
+      const c = tri[3 * f1] + tri[3 * f1 + 1] + tri[3 * f1 + 2] - a - b, d = tri[3 * f2] + tri[3 * f2 + 1] + tri[3 * f2 + 2] - a - b;
+      const m = pos.length / 3; pos.push((pos[3 * a] + pos[3 * b]) / 2, (pos[3 * a + 1] + pos[3 * b + 1]) / 2, (pos[3 * a + 2] + pos[3 * b + 2]) / 2); fixed.push(0);
+      for (const k of Object.keys(extra)) extra[k].push(extra[k][a]);
+      // f1 = (a, b, c) in some rotation -> (a, m, c), (m, b, c); f2 = (b, a, d) -> (b, m, d), (m, a, d)
+      tri[3 * f1] = a; tri[3 * f1 + 1] = m; tri[3 * f1 + 2] = c; tri.push(m, b, c);
+      tri[3 * f2] = b; tri[3 * f2 + 1] = m; tri[3 * f2 + 2] = d; tri.push(m, a, d);
+      dirty[f1] = dirty[f2] = 1; splits++;
+    }
+  }
+  // ---- collapses
+  {
+    const V = pos.length / 3, T = topology(Uint32Array.from(tri), V);
+    const nbrs = v => { const out = []; for (let k = T.start[v]; k < T.start[v + 1]; k++) out.push(T.nbr[k]); return out; };
+    const facesOf = Array.from({ length: V }, () => []); for (let f = 0; f < T.F; f++) for (let k = 0; k < 3; k++) facesOf[tri[3 * f + k]].push(f);
+    const normal = (f, replace, with_, P) => { const t = [tri[3 * f], tri[3 * f + 1], tri[3 * f + 2]].map(v => v === replace ? with_ : v); const q = v => (v === with_ && P) ? P : [pos[3 * v], pos[3 * v + 1], pos[3 * v + 2]]; const A = q(t[0]), B = q(t[1]), C = q(t[2]); const ux = B[0] - A[0], uy = B[1] - A[1], uz = B[2] - A[2], vx = C[0] - A[0], vy = C[1] - A[1], vz = C[2] - A[2]; return [uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx]; };
+    const dead = new Uint8Array(V), dirty = new Uint8Array(T.F), order = [];
+    // short interior edges, shortest first; and every edge of an interior vertex of degree 3 (a vertex inside one
+    // triangle, which the cotangent weights fold over sooner or later): such a vertex goes whatever the length
+    const sliverEdge = new Uint8Array(T.E);           // edges of slivers (an angle under 5°), which flips may not reach
+    for (let f = 0; f < T.F; f++) {
+      const t = [tri[3 * f], tri[3 * f + 1], tri[3 * f + 2]]; let bad = false;
+      for (let k = 0; k < 3 && !bad; k++) { const i = t[k], j = t[(k + 1) % 3], q = t[(k + 2) % 3];
+        const ux = pos[3 * j] - pos[3 * i], uy = pos[3 * j + 1] - pos[3 * i + 1], uz = pos[3 * j + 2] - pos[3 * i + 2], vx = pos[3 * q] - pos[3 * i], vy = pos[3 * q + 1] - pos[3 * i + 1], vz = pos[3 * q + 2] - pos[3 * i + 2];
+        if (Math.atan2(Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx), ux * vx + uy * vy + uz * vz) < 5 * Math.PI / 180) bad = true; }
+      if (bad) for (let k = 0; k < 3; k++) sliverEdge[T.triEdge[3 * f + k]] = 1;
+    }
+    for (let e = 0; e < T.E; e++) if (!T.boundaryEdge[e]) {
+      const a = T.ea[e], b = T.eb[e], l = len(a, b), da = T.start[a + 1] - T.start[a], db = T.start[b + 1] - T.start[b];
+      if (l < low || sliverEdge[e] || (!fixed[a] && da === 3) || (!fixed[b] && db === 3)) order.push([l, e]);
+    }
+    order.sort((x, y) => x[0] - y[0]);
+    for (const [, e] of order) {
+      let a = T.ea[e], b = T.eb[e];
+      if (dead[a] || dead[b] || (fixed[a] && fixed[b])) continue;
+      if (fixed[b] || (!fixed[a] && T.start[a + 1] - T.start[a] === 3 && T.start[b + 1] - T.start[b] !== 3)) [a, b] = [b, a];   // a survives, b goes
+      if (facesOf[a].some(f => dirty[f]) || facesOf[b].some(f => dirty[f])) continue;
+      const na = nbrs(a), nb = nbrs(b), common = na.filter(v => nb.includes(v));
+      if (common.length !== 2) continue;               // the link condition
+      // no remaining triangle may end up with its three vertices on the boundary
+      if (fixed[a] && facesOf[b].some(f => { const t = [tri[3 * f], tri[3 * f + 1], tri[3 * f + 2]]; return !t.includes(a) && t.every(v => v === b || fixed[v]); })) continue;
+      const P = fixed[a] ? null : [(pos[3 * a] + pos[3 * b]) / 2, (pos[3 * a + 1] + pos[3 * b + 1]) / 2, (pos[3 * a + 2] + pos[3 * b + 2]) / 2];
+      // the new triangles must face the way the neighbourhood faces (its area-weighted normal), which lets a
+      // collapse repair a fold rather than preserve it
+      const ref = [0, 0, 0]; for (const f of new Set([...facesOf[a], ...facesOf[b]])) { const n0 = normal(f, -1, -1, null); ref[0] += n0[0]; ref[1] += n0[1]; ref[2] += n0[2]; }
+      const lr = Math.hypot(...ref); let ok = true;   // a neighbourhood too degenerate to have a normal is collapsed without the check
+      const faces = n1 => { const l1 = Math.hypot(...n1); return lr < 1e-14 || (l1 > 1e-14 && (ref[0] * n1[0] + ref[1] * n1[1] + ref[2] * n1[2]) > 0.2 * lr * l1); };
+      for (const f of facesOf[b]) { if (!ok) break; if (tri[3 * f] === a || tri[3 * f + 1] === a || tri[3 * f + 2] === a) continue; ok = faces(normal(f, b, a, P)); }
+      if (ok && P) for (const f of facesOf[a]) { if (tri[3 * f] === b || tri[3 * f + 1] === b || tri[3 * f + 2] === b) continue; if (!faces(normal(f, a, a, P))) { ok = false; break; } }
+      if (!ok) continue;
+      for (const f of facesOf[b]) { if (tri[3 * f] === a || tri[3 * f + 1] === a || tri[3 * f + 2] === a) { tri[3 * f] = tri[3 * f + 1] = tri[3 * f + 2] = -1; } else { for (let k = 0; k < 3; k++) if (tri[3 * f + k] === b) tri[3 * f + k] = a; facesOf[a].push(f); } dirty[f] = 1; }
+      for (const f of facesOf[a]) dirty[f] = 1;
+      if (P) { pos[3 * a] = P[0]; pos[3 * a + 1] = P[1]; pos[3 * a + 2] = P[2]; }
+      dead[b] = 1; collapses++;
+    }
+    // compact
+    const map = new Int32Array(V).fill(-1); let n = 0;
+    for (let v = 0; v < V; v++) if (!dead[v]) map[v] = n++;
+    const newPos = new Float64Array(3 * n), newFixed = new Uint8Array(n), newExtra = {};
+    for (const k of Object.keys(extra)) newExtra[k] = new (mesh[k].constructor)(n);
+    for (let v = 0; v < V; v++) if (map[v] >= 0) { const w = map[v]; newPos[3 * w] = pos[3 * v]; newPos[3 * w + 1] = pos[3 * v + 1]; newPos[3 * w + 2] = pos[3 * v + 2]; newFixed[w] = fixed[v]; for (const k of Object.keys(extra)) newExtra[k][w] = extra[k][v]; }
+    const newTri = []; for (let f = 0; f < tri.length / 3; f++) if (tri[3 * f] >= 0) newTri.push(map[tri[3 * f]], map[tri[3 * f + 1]], map[tri[3 * f + 2]]);
+    mesh.pos = newPos; mesh.fixed = newFixed; mesh.tri = Uint32Array.from(newTri);
+    for (const k of Object.keys(extra)) mesh[k] = newExtra[k];
+    if (mesh.loops) mesh.loops = mesh.loops.map(L => L.map(v => map[v]));
+    prepare(mesh);
+    let flips = 0;
+    if (opts.flips !== false) flips = flipDelaunay(mesh, opts.flipPasses || 3);
+    if (opts.tangential) tangentialSmooth(mesh, typeof opts.tangential === 'number' ? opts.tangential : 0.5);
+    return { splits, collapses, flips, map, V: n, F: mesh.tri.length / 3 };
+  }
+}
+Minimal.remesh = remesh;
+// Settling the film on a still wire, round by round, with an adaptive time step: implicit mean curvature flow
+// from a step of one edge length squared, doubled while a round moves no vertex more than half an edge, halved
+// (and the round undone) when the solve fails; positive weights and a
+// remeshing every round while the step is small, the exact cotangent weights (the discrete minimal surface) once
+// it is large, and the harmonic step at the end.  State from settleInit; each round returns the relax stats.
+function settleInit(mesh, opts = {}) {
+  const target = opts.target || meanEdgeLength(mesh);
+  return { target, dt: target * target, round: 0, every: opts.every || 5, tangential: opts.tangential === undefined ? 0.3 : opts.tangential };
+}
+Minimal.settleInit = settleInit;
+function settleRound(mesh, st) {
+  const t = st.target, big = st.dt >= 64 * t * t, harmonic = st.dt >= 4096 * t * t;
+  // no cap on the move: with positive weights and the mass floor a step is a bounded average of neighbours, and the
+  // jump of a sliver's apex to that average is what removes the sliver
+  const r = relax(mesh, { dt: harmonic ? Infinity : st.dt, flips: true, tangential: st.tangential, tol: 1e-7, positive: !big });
+  let rm = null;
+  if (r.failed) { st.dt = Math.max(st.dt / 2, t * t / 16); rm = remesh(mesh, t, { tangential: 0.3 }); }
+  else {
+    if (r.moved < 0.5 * t && !harmonic) st.dt *= 2;
+    if (!big || (st.round + 1) % st.every === 0 || bunched(mesh)) rm = remesh(mesh, t, { tangential: 0.3 });
+  }
+  st.round++;
+  // a pinch: vertices bunched up that the remeshing cannot spread out again means a neck of the surface is closing,
+  // the film leaving the surface's isotopy class (a handle would be lost).  The caller should stop.
+  const pinched = !!rm && bunched(mesh);
+  if (pinched) st.pinched = (st.pinched || 0) + 1; else st.pinched = 0;
+  return Object.assign(r, { remesh: rm, area: area(mesh), dt: harmonic ? Infinity : st.dt, harmonic, pinched: st.pinched >= 2 });
+}
+Minimal.settleRound = settleRound;
+// vertices bunched up: some interior vertex has less than a thousandth of the mean vertex area
+function bunched(mesh) {
+  const { mass } = weights(mesh); let mean = 0, n = 0, min = Infinity;
+  for (let v = 0; v < mass.length; v++) if (!mesh.fixed[v]) { mean += mass[v]; n++; min = Math.min(min, mass[v]); }
+  return n > 0 && min < 1e-3 * mean / n;
+}
+Minimal.bunched = bunched;
 
 // ------------------------------------------------------------------ checks and diagnostics
 function eulerCharacteristic(mesh) { const T = mesh.topo || topology(mesh.tri, mesh.pos.length / 3); return T.V - T.E + T.F; }

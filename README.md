@@ -1,13 +1,14 @@
 # SeifertSurface
 
 A Seifert surface for a knot or link `K ⊂ ℝ³` is a compact oriented surface with boundary `K`. This project draws
-one for any closed braid, in three steps. First it builds the classical one, Seifert's algorithm applied to the closed
-braid: one disk per strand stacked along the braid axis, one half-twisted band per crossing (the Bennequin surface).
-Then it tames the wire: the boundary of that surface is relaxed as a knot with Scharein's KnotPlot forces, the ones
-van Wijk and Cohen use, while the surface follows it as a rubber sheet. Then it fixes the wire and relaxes the
-surface to the minimal surface spanning it, by solving the minimal surface equation on it: the soap film on a knotted
-wire. Alongside, it reads the invariants off the surface: the Seifert matrix, the Alexander polynomial, the
-signature, the genus.
+one for any closed braid as the soap film on a tame wire. It builds the classical surface first, Seifert's algorithm
+applied to the closed braid: one disk per strand stacked along the braid axis, one half-twisted band per crossing
+(the Bennequin surface), a scaffold whose boundary is the knot. Then, on its own, it tames that wire as a knot with
+Scharein's KnotPlot forces, the ones van Wijk and Cohen use, with the film following, and settles the film on the
+still wire by solving the minimal surface equation on it. What is shown is always the film; bend the wire by hand
+and the film follows, tame it again when it is bent too much. Alongside, it reads the invariants off the surface:
+the Seifert matrix, the Alexander polynomial, the signature, the genus. A soap-film rendering shows it as a real
+film would look, thin-film interference and all.
 
 It is a single-page web app in the shape of [EllipticCurve3D](../EllipticCurve3D): `web/index.html` with `js/`, `css/`
 and `data/`, three.js and KaTeX vendored, no build step; the mathematics in two dependency-free modules that also run
@@ -23,28 +24,29 @@ python3 -m http.server -d ~/Projects/SeifertSurface/web 8766      # then http://
 |---|---|
 | `web/index.html` | the page |
 | `web/js/seifert.js` | braid words, the closed braid, the Bennequin surface as a triangle mesh, the Seifert matrix, `Δ(t)`, signature |
-| `web/js/minimal.js` | discrete minimal surfaces: cotangent Laplacian, conjugate gradients, the harmonic step and mean curvature flow, the harmonic extension that carries the surface with the wire, Delaunay flips, tangential smoothing, diagnostics, linking numbers |
-| `web/js/wire.js` | taming the wire: Scharein's KnotPlot relaxation of the boundary loops (springs, repulsion, damped Euler, self-intersection refused) |
+| `web/js/minimal.js` | discrete minimal surfaces: cotangent Laplacian, conjugate gradients, the harmonic step and mean curvature flow, the harmonic extension that carries the surface with the wire, Delaunay flips, tangential smoothing, isotropic remeshing, the settling schedule with pinch detection, diagnostics, linking numbers |
+| `web/js/wire.js` | taming the wire: Scharein's KnotPlot relaxation of a coarse copy of the boundary loops (springs, repulsion, damped Euler, strands kept apart), the mesh boundary interpolated from it, the carry of the surface |
 | `web/js/app.js` | viewer and UI |
 | `web/js/vendor/` | three.js r128, OrbitControls, KaTeX 0.16.11 (licenses alongside) |
 | `web/css/` | the stylesheet (EllipticCurve3D's), KaTeX's with its fonts |
 | `web/data/knots.json` | KnotInfo's braid words for the 2,961 knots through 12 crossings and LinkInfo's for the 4,188 links through 11, with the knots' genera |
 | `web/data/braid.sage` | `sage web/data/braid.sage K12n242` (or a PD code, or `DT:[...]`): a braid word for any knot, by SnapPy |
-| `web/test/test-seifert.mjs` | `node web/test/test-seifert.mjs`: 193 checks against Sage's values in `vectors.json` (made by `make_vectors.sage`), plus the mesh, the wire and the solver |
+| `web/test/test-seifert.mjs` | `node web/test/test-seifert.mjs`: 206 checks against Sage's values in `vectors.json` (made by `make_vectors.sage`), plus the mesh, the wire, the solver and the whole pipeline |
 
 The web app takes a braid word (`1 2 -1 2`, `s1 s2 s1^-1 s2`, `σ₁σ₂σ₁⁻¹σ₂`, `abAb`, `(1 2)^5`), a torus link `T(p, q)`,
 or a name from the tables (`3_1`, `12n242`, `11n_34`, `L6a4`, `L2a1{1}`, and the aliases `trefoil`, `figure-eight`,
 `hopf`, `whitehead`, `borromean`, `lehmer`). The info line gives the braid, the strands, crossings and components,
 `χ` and the genus of the surface, `Δ(t)`, `det`, `σ`, and whether the surface has the knot's genus (from KnotInfo, or
-from `deg Δ = 2g`). **Tame wire** relaxes the wire (the surface following), **Relax film** relaxes the surface on the
-wire as it is; both can run at once. The flow bar shows the film's round, the area, the root mean square of the
-discrete mean curvature `|H|` over the interior (the residual of the equation), the largest displacement, and the
-wire's steps and growth. The drawer has four tabs: **Surface** (the starting surface: disk spacing, band width and
-bulge, resolution, the rounding of the wire's corners), **Wire** (weak or strong repulsion, its strength, the step,
-damping and decay, steps per tick, the stopping rule, a new cycle), **Film** (the harmonic step or mean curvature
-flow with a finite step, edge flips, tangential smoothing, the stopping rule), **Display** (two-sided coloring, or by
-disk and band, or by mean curvature; opacity, wireframe, the wire and its thickness, the starting surface as a ghost,
-axes, PNG, a shareable link `#word`).
+from `deg Δ = 2g`). On Build the wire is tamed and the film settled, a few seconds of animation; the status shows
+the phase, the area, the root mean square of the discrete mean curvature `|H|` over the interior (the residual of the
+equation), the vertex count and the wire's growth. **Tame wire** runs the taming again from the wire as it is (for
+after bending it), **Drag wire** lets one bend it, **Soap film** switches the rendering, **Reset** goes back to the
+scaffold and starts over. The drawer has four tabs: **Surface** (the scaffold: disk spacing, band width and bulge,
+resolution, the rounding of the wire's corners, whether to tame on build), **Wire** (weak or strong repulsion, its
+strength, the clearance between strands, the most steps, the brush for dragging), **Film** (how often to remesh,
+tangential smoothing, rounds per tick, when the film counts as settled), **Display** (two-sided coloring, or by disk
+and band, or by mean curvature, or the soap film with its thickness range, opacity and light; wireframe, the wire and
+its thickness, the scaffold as a ghost, axes, PNG, a shareable link `#word`).
 
 Conventions are Sage's: `σᵢ` is the positive crossing, so the closure of `σ₁³` is the right-handed trefoil, signature
 `−2`. The Seifert matrix is computed by the algorithm of Collins ([Col2013]) as Sage's `Link.seifert_matrix` does,
@@ -99,21 +101,66 @@ and the repulsion balance; nothing depends on that scale. The energy falls monot
 trefoil the total turning of the wire drops from 5.6 turns to 2.2 in a few thousand steps of 2 ms each, and the
 stacked rims open into a round three-dimensional trefoil.
 
-The surface is not given springs of its own, as theirs is. After every few steps of the wire the surface is carried
-along as a rubber sheet: the wire's displacement is extended harmonically into the interior (the same cotangent
-Laplace solve as the film, with the displacement as boundary data, `Minimal.extend`), which moves every vertex
-smoothly; a translation, rotation or dilation of the wire is transported exactly. Then one round of the film is run
-on the moved wire, so what is shown while the wire relaxes is the soap film on the wire as it is, and the flips and
-the tangential smoothing keep the mesh sound as the wire stretches. The surface, like theirs, is not checked for
+Two things are done differently. The forces cost `N²`, and the mesh boundary has several hundred points per loop,
+so the dynamics runs on a coarse copy of each loop, resampled at equal arclength one tenth of a radius apart, and the
+mesh boundary is interpolated back from it by a Catmull–Rom spline at equal arclength, its first point anchored at
+the point of the new curve nearest to where it was (the coarse points slide along the loop as they relax, and the
+mesh boundary must not slide with them, or the surface next to it is sheared without end). And KnotPlot's `d_close`
+is a fraction of the spacing; here it is two spacings: a film between two strands closer than a few mesh edges
+cannot be resolved, and pinches. With the original value the pretzel knot's wire brought two strands within two
+thirds of a spacing and the film between them closed a handle.
+
+The surface is not given springs of its own, as theirs is. Whenever the coarse wire has moved half a spacing, the
+surface is carried along as a rubber sheet: the wire's displacement is extended harmonically into the interior (the
+same Laplace solve as the film, with the displacement as boundary data and positive weights, so that no interior
+vertex moves further than the wire does, `Minimal.extend`); the mesh is remeshed to its scaffold edge length scaled
+by the wire's growth (`Minimal.remesh`: Botsch–Kobbelt isotropic remeshing, long interior edges split, short ones
+collapsed under the link condition and a check that no triangle turns over, slivers and interior vertices of degree
+three collapsed away, then Delaunay flips and tangential smoothing; the boundary polygon is never touched); and one
+gentle round of the film is run (a few edge lengths squared of mean curvature flow with positive weights), so that
+the surface tracks the film as the wire moves rather than drifting away from it as a rubber sheet. The full harmonic
+step must not be used while the wire moves: it pulls interior vertices onto the wire where the surface wraps a bend
+faster than any remeshing can collapse them.
+
+Once the wire is still the film settles (`Minimal.settleRound`): implicit mean curvature flow from a step of one
+edge length squared, doubled while a round moves no vertex more than half an edge, halved and the round undone when
+the solve fails, positive weights and a remeshing every round while the step is small, the exact cotangent weights
+once it is large, the harmonic step at the end; a vertex's mass is floored at a tenth of the mean so that a vertex
+with a tiny area moves like the others and not at infinite speed. It counts as settled when the area has stopped
+falling. If vertices bunch up that the remeshing cannot spread out again, a neck of the surface is closing: the film
+is leaving the surface's isotopy class, a handle would be lost, and the app stops there and says so, both during
+taming (the taming stops at that step) and while settling. The surface, like theirs, is not checked for
 self-intersection; the wire is.
 
 The same machinery lets one deform the wire by hand: with **Drag wire** on, a point of the wire dragged with the
 pointer moves in the plane facing the camera, its neighbours along the loop with it (a Gaussian falloff of a chosen
-width), and the surface follows as the film on the moved wire. Nothing stops a strand from being pushed through
-another here. Whether one tames first and then spans the wire, or carries the surface along as it is done here, the
-film at the end is the same: it depends only on the final wire and on the isotopy class carried along. The order
-matters for a wire that is not born from the scaffold, a parametrised or hand-drawn knot: spanning a *given* wire
-needs Seifert's algorithm on its projection, built in the wire's own geometry, which is in the plan below.
+width), the surface follows, and the film settles again when the pointer is released; **Tame wire** afterwards
+relaxes the bent wire. Nothing stops a strand from being pushed through another here. Whether one tames first and
+then spans the wire, or carries the surface along as it is done here, the film at the end is the same: it depends
+only on the final wire and on the isotopy class carried along. The order matters for a wire that is not born from
+the scaffold, a parametrised or hand-drawn knot: spanning a *given* wire needs Seifert's algorithm on its projection,
+built in the wire's own geometry, which is in the plan below.
+
+## The soap-film rendering
+
+The mathematics gives a surface of zero thickness; what makes a picture read as a soap film is a very thin layer
+of water with Fresnel reflection, strong at grazing angles, a reflected environment, and thin-film interference whose
+colour depends on the local thickness. So the app gives the surface a thickness field `d: M → (0, ∞)` in nanometres
+(a drainage profile along the axis, thick below and thin above, thick at the wire where the Plateau border sits, a
+gentle unevenness, then one implicit diffusion step on the surface's own Laplacian so that it varies over many
+edges), as a vertex attribute of the mesh, and renders the surface with three.js's physically based material, its
+specular light multiplied by the colour of a free-standing water film of that thickness. That colour is computed
+spectrally once, into a lookup table: the film reflects the Airy fraction `R(λ) = 2ρ²(1 − cos δ) / (1 + ρ⁴ − 2ρ² cos δ)`
+with `δ = 4π n d cos θ_f / λ` and `ρ = (n − 1)/(n + 1)` (the two reflections differ by π, so the thinnest film is
+black, as a real one is), integrated over the visible wavelengths against the CIE colour matching functions and
+converted to sRGB: Newton's series, black, grey, white, yellow, orange, red, violet, blue, green, and the pale
+higher orders. Three.js's own iridescence was tried first and set aside: it models a film on a substrate of
+refractive index 1.5, not a film in air, and gives a purple cast. No diffuse colour, a water-like Fresnel response
+from the physically based model, a painted room as the environment (prefiltered for reflections) and as the
+background, the film's opacity to what lies behind it rising with the Fresnel term at grazing angles, the reflected
+light added unweighted, back faces drawn before front faces. The wire becomes dark metal. It is rasterised, not
+ray-traced: for an interactive viewer this is the right baseline, and the mesh can be exported to a path tracer for
+a still. The thickness range, the opacity and the light are in the Display tab.
 
 The Seifert form on `H₁` of this surface has a basis of loops that go up one band, along the upper disk, down the
 next band of the same column and back along the lower disk; the linking numbers between them and their push-offs are
@@ -259,8 +306,10 @@ mirror, `2`); the solver on a bumped disk (flattens to the polygon's area, `H �
 (area within 0.5% of the exact catenoid, waist radius, monotone area under both the harmonic step and mean curvature
 flow), and on the trefoil's surface (area decreases, `χ` and orientation survive the flips, the wire does not move,
 the residual falls); the wire relaxation on a circle (stays round and evenly spaced, grows) and on the trefoil (the
-energy falls monotonically, the total turning halves, no strand within `d_close` of another, the surface follows and
-stays sound, the film on the tamed wire relaxes).
+energy falls monotonically, the total turning halves, no strand closer than it started, the surface follows and
+stays sound, the film on the tamed wire relaxes); the whole pipeline on the trefoil and the pretzel knot (the wire
+opens, no pinch, a settled film, `χ` and orientation kept through the remeshing, the wire still while the film
+settles); a stress test of taming with film rounds.
 
 ## Planned
 
@@ -273,7 +322,7 @@ stays sound, the film on the tamed wire relaxes).
   in the wire's own geometry and the wire comes first. Van Wijk and Cohen list the same as future work.
 * **Diagrams as input.** PD and DT codes through `braid.sage` (SnapPy's Vogel algorithm), as `SkeinA/data/braids.txt`
   already does for the census.
-* **A self-intersection check** during the flow, and isotropic remeshing (edge split and collapse) beside the flips.
+* **A self-intersection check** during the flow, and order-independent transparency for the film when its parts overlap on screen.
 * **The global minimiser.** Wang–Chern's minimal currents for the area-minimising surface over all topologies, to compare with the fixed-topology one: when they differ, the wire's least-area surface is not the Bennequin surface's isotopy class.
 * **Export** of the relaxed mesh (OBJ/STL) for printing, and GitHub Pages as for EllipticCurve3D.
 

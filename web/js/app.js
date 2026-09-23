@@ -1,16 +1,20 @@
-/* app.js -- viewer and UI for the Seifert Surface web app.  Globals: THREE, katex, Seifert, Minimal, Wire. */
+/* app.js -- viewer and UI for the Seifert Surface web app.  Globals: THREE, katex, Seifert, Minimal, Wire.
+   Build: the scaffold (Seifert.buildSurface), then the pipeline runs on its own: the wire is tamed with the film
+   following (Wire.carry), then the film settles on the still wire (Minimal.settleRound).  The film is kept settled
+   whenever the wire moves (a drag, or Tame wire again).  Coloring: two sides, disks and bands, mean curvature, or a
+   soap film with thin-film interference from a per-vertex thickness. */
 (function () {
 'use strict';
 const $ = id => document.getElementById(id);
 const isMobile = matchMedia('(max-width: 640px)').matches || navigator.maxTouchPoints > 1;
 
-const state = { spacing: 0.45, bandwidth: 1.2, bulge: 0.7, angular: isMobile ? 96 : 144, round: 0.1,
-                dt: 3.1, flips: true, tangential: 0.3, perframe: 2, stop: -7,          // dt is log10 of the step; 3.1 is ∞
-                alpha: 0, kh: 0, dt0: 0.2, gamma: 0.15, decay: 0.0003, wiresteps: 10, wirestop: -5,   // the wire: kh is log10 of K/H
-                drag: false, brush: 0.08,                                                        // dragging the wire by hand
-                coloring: 'sides', opacity: 1, wireframe: false, wire: true, thick: 0.02, ghost: false, axes: false };
-let mesh = null, record = null, lastText = '', iteration = 0, running = false, lastStats = null, sizeRadius = 2, areas = [];
-let wire = null, wireRunning = false, wireStats = null;                                   // the wire's relaxation state (Wire.init)
+const state = { spacing: 0.45, bandwidth: 1.2, bulge: 0.7, angular: isMobile ? 96 : 144, round: 0.1, auto: true,
+                alpha: 0, kh: 0, dclose: 2, maxsteps: 2500, brush: 0.08, drag: false,          // the wire: kh is log10 of K/H
+                every: 5, tangential: 0.3, perframe: 2, stop: -7,                                // the film
+                coloring: 'sides', opacity: 1, wireframe: false, wire: true, thick: 0.02, ghost: false, axes: false,
+                soapmin: 100, soapmax: 800, soapopacity: 0.35, envbright: 2.5 };
+let mesh = null, scaffold = null, wire = null, record = null, lastText = '', sizeRadius = 2;
+let phase = 'idle', settle = null, areas = [], lastStats = null, remarks = [];   // phase: idle | taming | settling
 
 // ------------------------------------------------------------------ scene
 const view = $('view');
@@ -27,7 +31,7 @@ controls.enableDamping = true; controls.dampingFactor = 0.12;
 controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
 controls.addEventListener('change', requestRender);
 const keyLight = new THREE.DirectionalLight(0xffffff, 0.8); keyLight.position.set(-6, 4, 8); camera.add(keyLight); scene.add(camera);
-scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+const ambient = new THREE.AmbientLight(0xffffff, 0.55); scene.add(ambient);
 const fill = new THREE.DirectionalLight(0xffffff, 0.35); fill.position.set(4, -5, -7); scene.add(fill);
 let dirty = true;
 function requestRender() { dirty = true; }
@@ -36,18 +40,6 @@ function requestRender() { dirty = true; }
   const moved = controls.update();
   if (moved || dirty) { renderer.render(scene, camera); dirty = false; }
 })();
-// The relaxation runs on its own timer, not on the animation frames (which a hidden or embedded page throttles):
-// `perframe` rounds per tick, the picture updated as frames come.
-let ticking = false;
-function tick() {
-  ticking = false;
-  if (!mesh || (!running && !wireRunning)) return;
-  try {
-    if (wireRunning) tameOnce();
-    if (running) for (let k = 0; k < state.perframe && running; k++) relaxOnce();
-  } catch (e) { setRunning(false); setWireRunning(false); setInfo(`<span class="err">${esc(e.message)}</span> — Reset the surface`, ''); console.error(e); return; }
-  if (running || wireRunning) { ticking = true; setTimeout(tick, 0); }
-}
 window.addEventListener('resize', () => { renderer.setSize(view.clientWidth, view.clientHeight); camera.aspect = view.clientWidth / view.clientHeight; camera.updateProjectionMatrix(); requestRender(); });
 function resetView() {
   const R = sizeRadius, dist = R / Math.sin(Math.PI / 9) * 1.05;
@@ -55,6 +47,31 @@ function resetView() {
   camera.position.set(dist * s3 * c5, -dist * s3 * s5, dist * c3);
   controls.target.set(0, 0, 0); camera.near = 0.01 * R; camera.far = 100 * R; camera.updateProjectionMatrix(); controls.update(); requestRender();
 }
+function wireRadius() {                                          // the extent of the wire, for the view
+  let r = 0; if (mesh) for (const loop of mesh.loops) for (const v of loop) r = Math.max(r, Math.hypot(mesh.pos[3 * v], mesh.pos[3 * v + 1], mesh.pos[3 * v + 2]));
+  return r;
+}
+function keepInView() {                                          // the wire grows: keep it in view, from the same direction
+  const r = wireRadius();
+  if (r > sizeRadius) { camera.position.multiplyScalar(r / sizeRadius); sizeRadius = r; camera.far = 100 * r; camera.updateProjectionMatrix(); }
+}
+
+// ------------------------------------------------------------------ the environment (for the soap film and the wire's metal)
+// A room: a sky gradient with a few soft lights, painted on a canvas as an equirectangular map, prefiltered by PMREM.
+function makeEnvironment() {
+  const W = 1024, H = 512, canvas = document.createElement('canvas'); canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d'), g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#f2f5f8'); g.addColorStop(0.45, '#b8c0ca'); g.addColorStop(0.55, '#6f7780'); g.addColorStop(1, '#2a2f36');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  const light = (x, y, w, h, color) => { const r = ctx.createRadialGradient(x, y, 0, x, y, Math.max(w, h)); r.addColorStop(0, color); r.addColorStop(0.7, color); r.addColorStop(1, 'rgba(255,255,255,0)'); ctx.fillStyle = r; ctx.fillRect(x - w, y - h, 2 * w, 2 * h); };
+  light(180, 120, 180, 90, '#ffffff'); light(620, 90, 140, 80, '#fff4e0'); light(880, 170, 80, 140, '#e8f0ff'); light(400, 330, 260, 40, '#ffffff'); light(760, 380, 120, 50, '#ffe9d0');
+  const tex = new THREE.CanvasTexture(canvas); tex.mapping = THREE.EquirectangularReflectionMapping; tex.encoding = THREE.sRGBEncoding;
+  const pmrem = new THREE.PMREMGenerator(renderer); pmrem.compileEquirectangularShader();
+  const env = pmrem.fromEquirectangular(tex).texture; tex.dispose(); pmrem.dispose();
+  return env;
+}
+const envTexture = makeEnvironment();
+scene.environment = envTexture;
 
 // ------------------------------------------------------------------ materials and scene objects
 // The surface is oriented, so its two sides get two colors: the front (the side the normal points to, +z on the
@@ -63,9 +80,67 @@ const FRONT = 0x3a9d5d, BACK = 0xc8463a;
 const frontMaterial = new THREE.MeshPhongMaterial({ color: FRONT, side: THREE.FrontSide, shininess: 30, specular: new THREE.Color(0x333333), transparent: true, opacity: 1 });
 const backMaterial = new THREE.MeshPhongMaterial({ color: BACK, side: THREE.BackSide, shininess: 30, specular: new THREE.Color(0x333333), transparent: true, opacity: 1 });
 const ghostMaterial = new THREE.MeshBasicMaterial({ color: 0x888888, wireframe: true, transparent: true, opacity: 0.25, depthWrite: false });
+// The soap film: no diffuse colour, a water-like specular response with the environment, and thin-film
+// interference computed spectrally.  A free-standing film of water (n = 1.333) in air reflects, at wavelength λ and
+// optical path 2 n d cos θ_f, the Airy fraction R = 2ρ²(1 − cos δ) / (1 + ρ⁴ − 2ρ² cos δ), δ = 4π n d cos θ_f / λ,
+// ρ = (n − 1)/(n + 1) the amplitude reflected at each face (the two reflections differ by π, so the thinnest film
+// is black).  Integrated over the visible spectrum against the CIE colour matching functions this gives the colour
+// of the film as a function of its thickness, Newton's series (black, grey, white, yellow, orange, red, violet,
+// blue, green, ...), tabulated once into a lookup texture and normalised to 1 at the brightest constructive
+// interference.  The shader multiplies the material's specular light (whose Fresnel term the physically based
+// model already provides) by that colour, looked up at the thickness `thick` given per vertex in nanometres, times
+// cos θ_f for the angle of view.  Alpha is the film's opacity to what is behind it, rising at grazing angles; the
+// reflected light is added unweighted (custom blending), as a film's reflection is not dimmed by its transparency.
+const FILM_N = 1.333, LUT_MAX_NM = 1500, LUT_N = 512;
+function newtonColours() {
+  // Wyman, Sloan, Shirley (2013): analytic fits of the CIE 1931 colour matching functions
+  const g = (x, mu, s1, s2) => { const t = (x - mu) / (x < mu ? s1 : s2); return Math.exp(-0.5 * t * t); };
+  const xbar = l => 1.056 * g(l, 599.8, 37.9, 31.0) + 0.362 * g(l, 442.0, 16.0, 26.7) - 0.065 * g(l, 501.1, 20.4, 26.2);
+  const ybar = l => 0.821 * g(l, 568.8, 46.9, 40.5) + 0.286 * g(l, 530.9, 16.3, 31.1);
+  const zbar = l => 1.217 * g(l, 437.0, 11.8, 36.0) + 0.681 * g(l, 459.0, 26.0, 13.8);
+  const rho2 = Math.pow((FILM_N - 1) / (FILM_N + 1), 2), Rmax = 4 * rho2 / Math.pow(1 + rho2, 2);
+  const data = new Uint8Array(4 * LUT_N); let X0 = 0, Y0 = 0, Z0 = 0;
+  for (let l = 380; l <= 730; l += 2) { X0 += xbar(l); Y0 += ybar(l); Z0 += zbar(l); }   // a flat spectrum
+  for (let i = 0; i < LUT_N; i++) {
+    const d = LUT_MAX_NM * i / (LUT_N - 1); let X = 0, Y = 0, Z = 0;
+    for (let l = 380; l <= 730; l += 2) {
+      const c = Math.cos(4 * Math.PI * FILM_N * d / l), R = 2 * rho2 * (1 - c) / (1 + rho2 * rho2 - 2 * rho2 * c) / Rmax;
+      X += R * xbar(l); Y += R * ybar(l); Z += R * zbar(l);
+    }
+    X /= X0; Y /= Y0; Z /= Z0;                            // relative to the flat spectrum, so R ≡ 1 is white
+    let r = 3.2406 * X - 1.5372 * Y - 0.4986 * Z, gg = -0.9689 * X + 1.8758 * Y + 0.0415 * Z, b = 0.0557 * X - 0.2040 * Y + 1.0570 * Z;   // XYZ (D65 white) to linear sRGB
+    const m = Math.max(r, gg, b, 1);
+    data[4 * i] = Math.round(255 * Math.max(0, r / m)); data[4 * i + 1] = Math.round(255 * Math.max(0, gg / m)); data[4 * i + 2] = Math.round(255 * Math.max(0, b / m)); data[4 * i + 3] = 255;
+  }
+  const tex = new THREE.DataTexture(data, LUT_N, 1, THREE.RGBAFormat); tex.minFilter = tex.magFilter = THREE.LinearFilter; tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping; tex.needsUpdate = true;
+  return tex;
+}
+const soapUniforms = { uSoapOpacity: { value: state.soapopacity }, uNewton: { value: newtonColours() }, uLutMax: { value: LUT_MAX_NM } };
+const soapShader = shader => {
+  Object.assign(shader.uniforms, soapUniforms);
+  const v0 = shader.vertexShader, f0 = shader.fragmentShader;
+  shader.vertexShader = v0
+    .replace('#include <common>', '#include <common>\nattribute float thick;\nvarying float vThick;')
+    .replace('#include <begin_vertex>', '#include <begin_vertex>\nvThick = thick;');
+  shader.fragmentShader = f0
+    .replace('#include <common>', '#include <common>\nvarying float vThick;\nuniform float uSoapOpacity;\nuniform sampler2D uNewton;\nuniform float uLutMax;')
+    .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n{\n  float cosT = clamp(abs(dot(normalize(normal), normalize(vViewPosition))), 0.0, 1.0);\n  float sin2 = (1.0 - cosT * cosT) / (1.333 * 1.333);\n  float cosF = sqrt(max(0.0, 1.0 - sin2));\n  vec3 fringe = texture2D(uNewton, vec2(clamp(vThick * cosF / uLutMax, 0.0, 1.0), 0.5)).rgb;\n  reflectedLight.directSpecular *= fringe;\n  reflectedLight.indirectSpecular *= fringe;\n}')
+    .replace('#include <output_fragment>', '#include <output_fragment>\n{\n  float cosT = clamp(abs(dot(normalize(normal), normalize(vViewPosition))), 0.0, 1.0);\n  float fres = pow(1.0 - cosT, 4.0);\n  gl_FragColor.a = clamp(uSoapOpacity + (1.0 - uSoapOpacity) * fres, 0.0, 1.0);\n}');
+  for (const [what, ok] of [['vertex attribute', shader.vertexShader !== v0], ['interference', shader.fragmentShader.includes('uNewton, vec2')], ['alpha', shader.fragmentShader.includes('uSoapOpacity +')]]) if (!ok) console.warn('soap film shader: the ' + what + ' hook did not match this three.js');
+};
+function makeSoapMaterial(side) {
+  const m = new THREE.MeshPhysicalMaterial({ color: 0x000000, metalness: 0, roughness: 0.04, side, transparent: true, depthWrite: false,
+    envMap: envTexture, envMapIntensity: state.envbright, reflectivity: 0.7,
+    blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor, blendEquation: THREE.AddEquation });
+  m.onBeforeCompile = soapShader; m.customProgramCacheKey = () => 'soap-film';
+  return m;
+}
+// two passes, the back faces first, then the front ones: a saner blend order for a transparent surface
+const soapMaterial = makeSoapMaterial(THREE.FrontSide), soapBackMaterial = makeSoapMaterial(THREE.BackSide);
 const WIRE_COLORS = [0x2d4f9e, 0xb3261e, 0xd08a00, 0x5b2a86, 0x0b7a75, 0x7a4a00];
+const wireMetal = new THREE.MeshStandardMaterial({ color: 0x3a3d42, metalness: 0.9, roughness: 0.35 });
 const group = new THREE.Group(); scene.add(group);
-let surfaceGeom = null, frontMesh = null, backMesh = null, ghostMesh = null, wireGroup = null, axesGroup = null;
+let surfaceGeom = null, frontMesh = null, backMesh = null, soapMesh = null, soapBackMesh = null, ghostMesh = null, wireGroup = null, axesGroup = null, tubeMaterials = [];
 const SERIF = '"STIX Two Text", "STIX Two Math", "Times New Roman", Times, serif';
 function makeLabel(text, x, y, z) {
   const canvas = document.createElement('canvas'), ctx = canvas.getContext('2d'), pr = 2, fs = 24;
@@ -84,8 +159,9 @@ function buildAxes(R) {
   return grp;
 }
 function disposeObject(obj) { if (!obj) return; group.remove(obj); obj.traverse(o => { if (o.geometry) o.geometry.dispose(); }); }
+const soap = () => state.coloring === 'soap';
 function buildWire() {
-  disposeObject(wireGroup); wireGroup = new THREE.Group();
+  disposeObject(wireGroup); wireGroup = new THREE.Group(); tubeMaterials = [];
   if (!mesh) return;
   mesh.loops.forEach((loop, k) => {
     const pts = loop.map(v => new THREE.Vector3(mesh.pos[3 * v], mesh.pos[3 * v + 1], mesh.pos[3 * v + 2]));
@@ -93,40 +169,51 @@ function buildWire() {
     const curve = new THREE.CatmullRomCurve3(pts, true, 'centripetal');
     const tube = new THREE.TubeGeometry(curve, Math.min(1200, 2 * pts.length), state.thick, 10, true);
     const mat = new THREE.MeshPhongMaterial({ color: WIRE_COLORS[k % WIRE_COLORS.length], shininess: 50, specular: new THREE.Color(0x333344) });
-    wireGroup.add(new THREE.Mesh(tube, mat));
+    tubeMaterials.push(mat);
+    wireGroup.add(new THREE.Mesh(tube, soap() ? wireMetal : mat));
   });
   wireGroup.visible = state.wire; group.add(wireGroup);
 }
-function buildSurfaceObjects() {
-  disposeObject(frontMesh); disposeObject(backMesh); disposeObject(ghostMesh); frontMesh = backMesh = ghostMesh = null;
+function buildSurfaceObjects() {                                 // (re)creates the geometry: after a build, a remeshing, a reset
+  disposeObject(frontMesh); disposeObject(backMesh); disposeObject(soapMesh); disposeObject(soapBackMesh); frontMesh = backMesh = soapMesh = soapBackMesh = null;
   if (!mesh) return;
   surfaceGeom = new THREE.BufferGeometry();
   surfaceGeom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(mesh.pos), 3));
   surfaceGeom.setAttribute('color', new THREE.BufferAttribute(new Float32Array(mesh.pos.length), 3));
+  surfaceGeom.setAttribute('thick', new THREE.BufferAttribute(new Float32Array(mesh.pos.length / 3).fill(state.soapmax), 1));
   surfaceGeom.setIndex(new THREE.BufferAttribute(new Uint32Array(mesh.tri), 1));
   surfaceGeom.computeVertexNormals();
   frontMesh = new THREE.Mesh(surfaceGeom, frontMaterial); backMesh = new THREE.Mesh(surfaceGeom, backMaterial);
-  group.add(frontMesh); group.add(backMesh);
-  const g0 = new THREE.BufferGeometry();
-  g0.setAttribute('position', new THREE.BufferAttribute(new Float32Array(mesh.initial), 3));
-  g0.setIndex(new THREE.BufferAttribute(new Uint32Array(mesh.tri), 1));
-  ghostMesh = new THREE.Mesh(g0, ghostMaterial); ghostMesh.visible = state.ghost; group.add(ghostMesh);
+  soapBackMesh = new THREE.Mesh(surfaceGeom, soapBackMaterial); soapBackMesh.renderOrder = 1; soapMesh = new THREE.Mesh(surfaceGeom, soapMaterial); soapMesh.renderOrder = 2;
+  group.add(frontMesh); group.add(backMesh); group.add(soapBackMesh); group.add(soapMesh);
   applyColoring(); applyOpacity();
 }
-function updateSurfacePositions() {                                  // after a relaxation round (connectivity may have changed by flips)
+function buildGhost() {
+  disposeObject(ghostMesh); ghostMesh = null;
+  if (!scaffold) return;
+  const g0 = new THREE.BufferGeometry();
+  g0.setAttribute('position', new THREE.BufferAttribute(new Float32Array(scaffold.pos), 3));
+  g0.setIndex(new THREE.BufferAttribute(new Uint32Array(scaffold.tri), 1));
+  ghostMesh = new THREE.Mesh(g0, ghostMaterial); ghostMesh.visible = state.ghost; group.add(ghostMesh);
+}
+function updateSurfacePositions() {                              // the same vertices, moved
   if (!surfaceGeom) return;
+  if (surfaceGeom.attributes.position.array.length !== mesh.pos.length || surfaceGeom.index.array.length !== mesh.tri.length) { buildSurfaceObjects(); return; }
   surfaceGeom.attributes.position.array.set(mesh.pos); surfaceGeom.attributes.position.needsUpdate = true;
-  if (surfaceGeom.index.array.length !== mesh.tri.length || surfaceGeom.index.array[7] !== mesh.tri[7]) surfaceGeom.setIndex(new THREE.BufferAttribute(new Uint32Array(mesh.tri), 1));
-  else { surfaceGeom.index.array.set(mesh.tri); surfaceGeom.index.needsUpdate = true; }
+  surfaceGeom.index.array.set(mesh.tri); surfaceGeom.index.needsUpdate = true;
   surfaceGeom.computeVertexNormals();
   if (state.coloring === 'curvature') applyColoring();
   requestRender();
 }
-// coloring: two sides (plain materials), the disks and bands of the starting surface, or the discrete mean curvature
+// coloring: two sides (plain materials), the disks and bands of the scaffold, the discrete mean curvature, or the film
 const PART_COLORS = [[0.22, 0.60, 0.36], [0.16, 0.44, 0.70], [0.80, 0.55, 0.10], [0.55, 0.25, 0.60], [0.05, 0.50, 0.48], [0.70, 0.30, 0.20], [0.45, 0.55, 0.15], [0.35, 0.35, 0.65]];
 function applyColoring() {
   if (!surfaceGeom) return;
-  const vertexColors = state.coloring !== 'sides';
+  const s = soap(), vertexColors = !s && state.coloring !== 'sides';
+  frontMesh.visible = backMesh.visible = !s; soapMesh.visible = soapBackMesh.visible = s;
+  renderer.setClearColor(0xffffff, 1); scene.background = s ? envTexture : null;
+  ambient.intensity = s ? 0.25 : 0.55;
+  if (wireGroup) wireGroup.children.forEach((m, k) => { m.material = s ? wireMetal : tubeMaterials[k]; });
   for (const m of [frontMaterial, backMaterial]) { m.vertexColors = vertexColors; m.needsUpdate = true; }
   frontMaterial.color.set(vertexColors ? 0xffffff : FRONT); backMaterial.color.set(vertexColors ? 0xffffff : BACK);
   if (vertexColors) {
@@ -134,67 +221,113 @@ function applyColoring() {
     if (state.coloring === 'parts') {
       for (let v = 0; v < V; v++) { const k = mesh.kind[v], c = k < mesh.n ? PART_COLORS[k % PART_COLORS.length] : [0.78, 0.78, 0.78]; col[3 * v] = c[0]; col[3 * v + 1] = c[1]; col[3 * v + 2] = c[2]; }
     } else {
-      const H = Minimal.meanCurvature(mesh).H; let scale = 0; const sorted = Float64Array.from(H).sort();
-      scale = sorted[Math.floor(0.95 * (sorted.length - 1))] || 1;   // the 95th percentile saturates
+      const H = Minimal.meanCurvature(mesh).H, sorted = Float64Array.from(H).sort(), scale = sorted[Math.floor(0.95 * (sorted.length - 1))] || 1;   // the 95th percentile saturates
       for (let v = 0; v < V; v++) { const t = Math.min(1, H[v] / scale); col[3 * v] = 0.95 * t + 0.92 * (1 - t); col[3 * v + 1] = 0.35 * t + 0.92 * (1 - t); col[3 * v + 2] = 0.2 * t + 0.92 * (1 - t); }
     }
     surfaceGeom.attributes.color.needsUpdate = true;
   }
+  if (s) computeThickness();
   requestRender();
 }
 function applyOpacity() {
   for (const m of [frontMaterial, backMaterial]) { m.opacity = state.opacity; m.depthWrite = state.opacity >= 1; m.wireframe = state.wireframe; }
+  for (const m of [soapMaterial, soapBackMaterial]) { m.wireframe = state.wireframe; m.envMapIntensity = state.envbright; }
+  soapUniforms.uSoapOpacity.value = state.soapopacity;
   requestRender();
+}
+// The film's thickness, in nanometres, per vertex: a drainage profile in the axis direction (thick below, thin above,
+// thick at the wire, the Plateau border), a gentle unevenness, then one implicit diffusion step on the surface's own
+// Laplacian so that it is smooth over many edges.
+function computeThickness() {
+  if (!mesh || !surfaceGeom) return;
+  const V = mesh.pos.length / 3, p = mesh.pos, dmin = state.soapmin, dmax = Math.max(state.soapmax, state.soapmin + 10);
+  let zmin = Infinity, zmax = -Infinity; for (let v = 0; v < V; v++) { zmin = Math.min(zmin, p[3 * v + 2]); zmax = Math.max(zmax, p[3 * v + 2]); }
+  const h0 = (zmin + zmax) / 2, sc = 0.25 * (zmax - zmin) + 1e-9, d0 = new Float64Array(V);
+  for (let v = 0; v < V; v++) {
+    const x = p[3 * v], y = p[3 * v + 1], z = p[3 * v + 2];
+    const sig = 1 / (1 + Math.exp((z - h0) / sc)), eta = Math.sin(3.1 * x + 1.7) * Math.sin(2.3 * y - 0.4) * Math.cos(2.9 * z + 0.9) + 0.5 * Math.sin(5.3 * x - 2.1 * y + 1.2 * z);
+    d0[v] = mesh.fixed[v] ? dmax : dmin + (dmax - dmin) * sig + 0.05 * (dmax - dmin) * eta;
+  }
+  if (!mesh.topo) Minimal.prepare(mesh);
+  const l = Minimal.meanEdgeLength(mesh), r = Minimal.solve(mesh, d0, { dims: 1, dt: 8 * l * l, positive: true, tol: 1e-6 });
+  const a = surfaceGeom.attributes.thick.array;
+  for (let v = 0; v < V; v++) a[v] = Math.max(dmin, Math.min(dmax, r.x[v]));
+  surfaceGeom.attributes.thick.needsUpdate = true; requestRender();
 }
 function rebuildDecorations() {
   disposeObject(axesGroup); axesGroup = buildAxes(sizeRadius * 0.9); axesGroup.visible = state.axes; group.add(axesGroup);
   buildWire(); requestRender();
 }
 
-// ------------------------------------------------------------------ the relaxation
-const dtValue = () => state.dt >= 3.05 ? Infinity : Math.pow(10, state.dt) * (mesh ? mesh.meanEdge * mesh.meanEdge : 1);
-function relaxOnce() {
-  if (!mesh) return;
-  const stats = Minimal.relax(mesh, { dt: dtValue(), flips: state.flips, tangential: state.tangential > 0 ? state.tangential : false, tol: 1e-8 });
-  iteration++; lastStats = stats; areas.push(stats.area);
-  updateSurfacePositions(); showStats();
-  // stop when the area has stopped decreasing: less than 10^stop of itself over the last five rounds
-  if (areas.length > 5 && (areas[areas.length - 6] - stats.area) / stats.area < Math.pow(10, state.stop)) setRunning(false);
+// ------------------------------------------------------------------ the pipeline: taming, then settling the film
+let ticking = false;
+function schedule() { if (!ticking) { ticking = true; setTimeout(tick, 0); } }
+function tick() {
+  ticking = false;
+  if (!mesh || phase === 'idle') return;
+  try {
+    if (phase === 'taming') tameTick(); else if (phase === 'settling') settleTick();
+  } catch (e) { phase = 'idle'; setStatus(`<span class="err">${esc(e.message)}</span>`); console.error(e); showButtons(); return; }
+  showButtons();
+  if (phase !== 'idle') schedule();
 }
-function showStats() {
-  $('v-iter').textContent = String(iteration);
-  if (!mesh) { for (const id of ['v-area', 'v-h', 'v-moved', 'v-wire']) $(id).textContent = '–'; return; }
-  const H = Minimal.meanCurvature(mesh);
-  $('v-area').textContent = Minimal.area(mesh).toFixed(4);
-  $('v-h').textContent = (H.rms * mesh.params.R).toPrecision(3);
-  $('v-moved').textContent = lastStats ? lastStats.moved.toExponential(1) : '–';
-  $('v-wire').textContent = wire && wire.steps ? `${wire.steps} steps, ×${(Wire.length(wire) / wire.L0).toFixed(2)}` : '–';
-}
-function setRunning(on) { running = !!on && !!mesh; $('run').textContent = running ? '❚❚ Pause film' : '▶ Relax film'; if (running && !ticking) { ticking = true; setTimeout(tick, 0); } }
-// ------------------------------------------------------------------ taming the wire
-function wireOptions() { return { alpha: state.alpha, K: Math.pow(10, state.kh), H: 1, gamma: state.gamma, dt0: state.dt0, decay: state.decay }; }
-function initWire() { wire = mesh ? Wire.init(mesh, wireOptions()) : null; wireStats = null; }
-function tameOnce() {                                            // `wiresteps` steps of the wire, then the surface follows
+function wireOptions() { return { alpha: state.alpha, K: Math.pow(10, state.kh), H: 1, dclose: state.dclose }; }
+function initWire() { wire = mesh ? Wire.init(mesh, wireOptions()) : null; if (wire) wire.meshEdge = mesh.edge0; }
+function startTaming() {
   if (!mesh || !wire) return;
-  Object.assign(wire.o, wireOptions());
-  let s = null;
-  for (let k = 0; k < state.wiresteps; k++) s = Wire.step(wire);
-  Wire.apply(wire, mesh, Minimal);
-  // one round of the film on the moved wire, so the surface shown is the soap film as it is and the mesh stays sound
-  Minimal.relax(mesh, { dt: dtValue(), flips: state.flips, tangential: state.tangential > 0 ? state.tangential : false, tol: 1e-8 });
-  wireStats = s; iteration = 0; areas = [];                       // the film's own count starts afresh on the moved wire
-  const r = wireRadius();                                          // the wire grows: keep it in view, from the same direction
-  if (r > sizeRadius) { camera.position.multiplyScalar(r / sizeRadius); sizeRadius = r; camera.far = 100 * r; camera.updateProjectionMatrix(); }
-  updateSurfacePositions(); buildWire(); showStats();
-  if (s.moved < Math.pow(10, state.wirestop) * mesh.params.R) setWireRunning(false);
+  Object.assign(wire.o, wireOptions()); Wire.restart(wire); wire.steps = 0;
+  phase = 'taming'; remarks = remarks.filter(r => !/^taming|^the film/.test(r)); setRemarks(remarks); schedule(); showButtons();
 }
-function setWireRunning(on) { wireRunning = !!on && !!mesh; $('tame').textContent = wireRunning ? '❚❚ Pause wire' : '▶ Tame wire'; if (wireRunning && !ticking) { ticking = true; setTimeout(tick, 0); } }
+function startSettling() {
+  if (!mesh) return;
+  settle = Minimal.settleInit(mesh, { every: state.every, tangential: state.tangential }); areas = [];
+  phase = 'settling'; schedule(); showButtons();
+}
+function tameTick() {
+  const r = Wire.carry(wire, mesh, Minimal, { tangential: state.tangential });
+  lastStats = r;
+  buildSurfaceObjects(); buildWire(); keepInView(); showStatus();
+  if (r.pinched) {
+    remarks.push(`taming stopped after ${wire.steps} steps: the film began to pinch (a handle closing); the wire would have to open more slowly, or less`);
+    setRemarks(remarks); startSettling(); return;
+  }
+  if (Wire.settled(wire) || wire.steps >= state.maxsteps) startSettling();
+}
+function settleTick() {
+  for (let k = 0; k < state.perframe && phase === 'settling'; k++) {
+    const s = Minimal.settleRound(mesh, settle); lastStats = s; areas.push(s.area);
+    if (s.remesh) buildSurfaceObjects(); else updateSurfacePositions();
+    if (s.pinched) { phase = 'idle'; remarks.push('the film pinches here: a handle of the surface is closing, so no film of this genus sits on this wire'); setRemarks(remarks); break; }
+    if (s.harmonic && areas.length > 5 && (areas[areas.length - 6] - s.area) / s.area < Math.pow(10, state.stop)) { phase = 'idle'; break; }
+    if (settle.round > 400) { phase = 'idle'; break; }
+  }
+  showStatus();
+  if (phase === 'idle' && soap()) computeThickness();
+}
+function setStatus(html) { $('status').innerHTML = html; }
+function showStatus() {
+  if (!mesh) { setStatus(''); return; }
+  const A = Minimal.area(mesh).toFixed(3), V = mesh.pos.length / 3;
+  if (phase === 'taming') setStatus(`taming: step ${wire.steps}, wire ×${(Wire.length(wire) / wire.L0).toFixed(2)}, area ${A}`);
+  else if (phase === 'settling') setStatus(`settling the film: round ${settle.round}${lastStats && lastStats.harmonic ? ' (harmonic)' : ''}, area ${A}`);
+  else { const H = Minimal.meanCurvature(mesh); setStatus(`settled: area ${A}, rms ${mixed('$|H|$')} ${(H.rms * mesh.params.R).toPrecision(2)}, ${V} vertices${wire && wire.steps ? `, wire ×${(Wire.length(wire) / wire.L0).toFixed(2)}` : ''}`); }
+}
+function showButtons() { $('tame').textContent = phase === 'taming' ? '❚❚ Pause' : '▶ Tame wire'; }
+function resetSurface() {
+  if (!scaffold) return;
+  phase = 'idle';
+  mesh.pos = scaffold.pos.slice(); mesh.tri = scaffold.tri.slice(); mesh.kind = scaffold.kind.slice(); mesh.fixed = scaffold.fixed.slice(); mesh.loops = scaffold.loops.map(l => l.slice());
+  Minimal.prepare(mesh); initWire(); lastStats = null; areas = []; remarks = remarks.filter(r => !/^taming|^the film/.test(r)); setRemarks(remarks);
+  sizeRadius = scaffold.sizeRadius; buildSurfaceObjects(); buildWire(); showStatus(); showButtons();
+  if (state.auto) startTaming();
+}
+
 // ------------------------------------------------------------------ deforming the wire by hand
-// With "Drag wire" on, dragging on the wire moves the point under the pointer in the plane facing the camera, the
-// points near it along the loop with it (a Gaussian falloff of width `brush` × the loop's length), and the surface
-// follows: the harmonic extension and one round of the film, as in taming.  No self-intersection check here.
+// With "Drag wire" on, dragging on the wire moves the coarse point under the pointer in the plane facing the camera,
+// the points near it along the loop with it (a Gaussian falloff of width `brush` × the loop's length), and the
+// surface follows: the harmonic extension and a gentle film round.  No self-intersection check here.
 const raycaster = new THREE.Raycaster();
-let drag = null;                                                 // { k (wire index), loop, plane, start (Vector3), P0 (the wire before the drag) }
+let drag = null;
 function pointerRay(ev) {
   const rect = renderer.domElement.getBoundingClientRect();
   raycaster.setFromCamera(new THREE.Vector2(((ev.clientX - rect.left) / rect.width) * 2 - 1, -((ev.clientY - rect.top) / rect.height) * 2 + 1), camera);
@@ -208,7 +341,8 @@ function wireDown(ev) {
   for (let i = 0; i < wire.N; i++) { const d = Math.hypot(wire.P[3 * i] - h.x, wire.P[3 * i + 1] - h.y, wire.P[3 * i + 2] - h.z); if (d < best) { best = d; k = i; } }
   const normal = new THREE.Vector3(); camera.getWorldDirection(normal);
   const anchor = new THREE.Vector3(wire.P[3 * k], wire.P[3 * k + 1], wire.P[3 * k + 2]);
-  drag = { k, plane: new THREE.Plane().setFromNormalAndCoplanarPoint(normal, anchor), anchor, P0: wire.P.slice(), pending: null };
+  phase = 'idle'; showButtons();
+  drag = { k, plane: new THREE.Plane().setFromNormalAndCoplanarPoint(normal, anchor), anchor, P0: wire.P.slice(), pending: null, queued: false };
   controls.enabled = false; ev.preventDefault();
   renderer.domElement.setPointerCapture(ev.pointerId);
 }
@@ -219,34 +353,29 @@ function wireMove(ev) {
   drag.pending = target; if (!drag.queued) { drag.queued = true; requestAnimationFrame(applyDrag); }
 }
 function applyDrag() {
-  if (!drag || !drag.pending) { if (drag) drag.queued = false; return; }
-  drag.queued = false;
-  const d = drag.pending.clone().sub(drag.anchor), k = drag.k, loop = wire.loopOf[k];
-  // arclength along the loop from k, in both directions, on the wire as it was when the drag started
-  const P0 = drag.P0, N = wire.N; let len = 0; const idx = []; for (let i = 0; i < N; i++) if (wire.loopOf[i] === loop) idx.push(i);
-  for (const i of idx) { const n = wire.next[i]; len += Math.hypot(P0[3 * n] - P0[3 * i], P0[3 * n + 1] - P0[3 * i + 1], P0[3 * n + 2] - P0[3 * i + 2]); }
+  if (!drag) return;
+  drag.queued = false; if (!drag.pending) return;
+  const d = drag.pending.clone().sub(drag.anchor), k = drag.k, loop = wire.loopOf[k], P0 = drag.P0, N = wire.N;
+  let len = 0; for (let i = 0; i < N; i++) if (wire.loopOf[i] === loop) { const n = wire.next[i]; len += Math.hypot(P0[3 * n] - P0[3 * i], P0[3 * n + 1] - P0[3 * i + 1], P0[3 * n + 2] - P0[3 * i + 2]); }
   const sigma = Math.max(1e-6, state.brush * len), dist = new Map([[k, 0]]);
-  let i = k, s = 0; while (true) { const n = wire.next[i]; if (n === k) break; s += Math.hypot(P0[3 * n] - P0[3 * i], P0[3 * n + 1] - P0[3 * i + 1], P0[3 * n + 2] - P0[3 * i + 2]); dist.set(n, Math.min(dist.get(n) ?? Infinity, Math.min(s, len - s))); i = n; }
+  let i = k, s = 0; while (true) { const n = wire.next[i]; if (n === k) break; s += Math.hypot(P0[3 * n] - P0[3 * i], P0[3 * n + 1] - P0[3 * i + 1], P0[3 * n + 2] - P0[3 * i + 2]); dist.set(n, Math.min(s, len - s)); i = n; }
   for (const [j, sj] of dist) { const w = Math.exp(-(sj * sj) / (2 * sigma * sigma)); for (let c = 0; c < 3; c++) wire.P[3 * j + c] = P0[3 * j + c] + w * d.getComponent(c); }
   Wire.apply(wire, mesh, Minimal);
-  Minimal.relax(mesh, { dt: dtValue(), flips: state.flips, tangential: state.tangential > 0 ? state.tangential : false, tol: 1e-7 });
-  iteration = 0; areas = []; updateSurfacePositions(); buildWire(); showStats();
+  const l = Minimal.meanEdgeLength(mesh);
+  Minimal.relax(mesh, { dt: 4 * l * l, flips: true, tangential: state.tangential, positive: true, tol: 1e-7 });
+  updateSurfacePositions(); buildWire(); showStatus();
 }
-function wireUp(ev) { if (!drag) return; drag = null; controls.enabled = true; try { renderer.domElement.releasePointerCapture(ev.pointerId); } catch (e) {} }
+function wireUp(ev) {
+  if (!drag) return;
+  drag = null; controls.enabled = true; try { renderer.domElement.releasePointerCapture(ev.pointerId); } catch (e) {}
+  Wire.restart(wire); startSettling();
+}
 renderer.domElement.addEventListener('pointerdown', wireDown);
 renderer.domElement.addEventListener('pointermove', wireMove);
 renderer.domElement.addEventListener('pointerup', wireUp);
 renderer.domElement.addEventListener('pointercancel', wireUp);
 function setDrag(on) { state.drag = !!on; $('drag').classList.toggle('active', state.drag); $('drag').setAttribute('aria-pressed', String(state.drag)); renderer.domElement.style.cursor = state.drag ? 'grab' : ''; }
-function resetSurface() {
-  if (!mesh) return;
-  setRunning(false); setWireRunning(false); mesh.pos.set(mesh.initial); mesh.tri.set(mesh.initialTri); Minimal.prepare(mesh); iteration = 0; lastStats = null; areas = [];
-  initWire(); updateSurfacePositions(); buildWire(); showStats();
-}
-function wireRadius() {                                          // the extent of the wire, for the view
-  let r = 0; if (mesh) for (const loop of mesh.loops) for (const v of loop) r = Math.max(r, Math.hypot(mesh.pos[3 * v], mesh.pos[3 * v + 1], mesh.pos[3 * v + 2]));
-  return r;
-}
+function setSoap(on) { state.coloring = on ? 'soap' : (state.coloring === 'soap' ? 'sides' : state.coloring); $('coloring').value = state.coloring; $('soap').classList.toggle('active', soap()); $('soap').setAttribute('aria-pressed', String(soap())); applyColoring(); }
 
 // ------------------------------------------------------------------ text
 const T = tex => katex.renderToString(tex, { throwOnError: false, output: 'html' });
@@ -272,7 +401,7 @@ function nextFrame() { return new Promise(r => { let done = false; const go = ()
 async function build(text, opts = {}) {
   text = (text || '').trim(); if (!text) return;
   lastText = text; $('input').value = text; updateHash(text);
-  $('busy').hidden = false; setRemarks([]); setRunning(false); setWireRunning(false); await nextFrame();
+  $('busy').hidden = false; phase = 'idle'; remarks = []; setRemarks(remarks); await nextFrame();
   try {
     const parsed = Seifert.parseBraid(text);
     if (parsed.error) throw new Error(parsed.error);
@@ -288,10 +417,11 @@ async function build(text, opts = {}) {
     if (!bd.connected) throw new Error(`σ${[...Array(bd.n - 1).keys()].map(i => i + 1).find(i => !word.some(g => Math.abs(g) === i))} never occurs: the closed braid is split and the surface would be disconnected`);
     if (bd.n * bd.c > 6000) throw new Error('too many strands and crossings to draw');
     mesh = Seifert.buildSurface(word, { spacing: state.spacing, bandWidth: state.bandwidth, bulge: state.bulge, angular: state.angular, round: state.round });
-    Minimal.prepare(mesh); mesh.initialTri = mesh.tri.slice(); mesh.meanEdge = Minimal.meanEdgeLength(mesh);
-    iteration = 0; lastStats = null; areas = []; initWire();
+    Minimal.prepare(mesh); mesh.edge0 = Minimal.meanEdgeLength(mesh); mesh.attrs = ['kind'];
     sizeRadius = Math.max(mesh.params.R + mesh.params.b + mesh.params.W, 0.6 * bd.n * state.spacing + 0.5);
-    buildSurfaceObjects(); rebuildDecorations(); if (!opts.keepView) resetView();
+    scaffold = { pos: mesh.pos.slice(), tri: mesh.tri.slice(), kind: mesh.kind.slice(), fixed: mesh.fixed.slice(), loops: mesh.loops.map(l => l.slice()), sizeRadius };
+    initWire(); lastStats = null; areas = [];
+    buildSurfaceObjects(); buildGhost(); rebuildDecorations(); if (!opts.keepView) resetView();
     // the info line
     const desc = [];
     if (record) desc.push(`<b>${T(prettyName(record.name))}</b>${label ? ' = ' + esc(label) : ''}`); else if (label) desc.push(`<b>${esc(label)}</b>`);
@@ -311,15 +441,12 @@ async function build(text, opts = {}) {
       if (bd.positive || bd.negative) desc.push(`${bd.positive ? 'positive' : 'negative'} braid`);
     }
     setInfo(desc.join(' | '));
-    const notes = [];
-    if (state.round === 0) notes.push('the wire keeps the corners of the stacked-disk construction');
-    else notes.push(`wire: the boundary of the stacked disks and bands, corners rounded at $${state.round}R$, ${mesh.loops.reduce((s, l) => s + l.length, 0)} points; mesh: ${mesh.pos.length / 3} vertices, ${mesh.tri.length / 3} triangles`);
-    setRemarks(notes);
-    showStats();
-    if (opts.autorun) setRunning(true);
+    remarks.push(`scaffold: ${mesh.pos.length / 3} vertices, ${mesh.tri.length / 3} triangles, wire of ${mesh.loops.reduce((s, l) => s + l.length, 0)} points${state.round ? `, corners rounded at $${state.round}R$` : ''}`);
+    setRemarks(remarks); showStatus(); showButtons();
+    if (state.auto) startTaming();
   } catch (e) {
-    mesh = null; record = null; wire = null; disposeObject(frontMesh); disposeObject(backMesh); disposeObject(ghostMesh); disposeObject(wireGroup); frontMesh = backMesh = ghostMesh = wireGroup = null;
-    setInfo(`<span class="err">${mixed(e.message)}</span>`, ''); showStats();
+    mesh = null; scaffold = null; record = null; wire = null; disposeObject(frontMesh); disposeObject(backMesh); disposeObject(soapMesh); disposeObject(soapBackMesh); disposeObject(ghostMesh); disposeObject(wireGroup); frontMesh = backMesh = soapMesh = soapBackMesh = ghostMesh = wireGroup = null;
+    setInfo(`<span class="err">${mixed(e.message)}</span>`, ''); showStatus();
   } finally { $('busy').hidden = true; requestRender(); }
 }
 function hashFor(text) { return '#' + encodeURIComponent(text); }
@@ -337,13 +464,9 @@ for (const [label, value] of EXAMPLES) { const o = document.createElement('optio
 $('examples').addEventListener('change', e => { if (e.target.value) build(e.target.value); e.target.value = ''; });
 $('build').addEventListener('click', () => build($('input').value));
 $('input').addEventListener('keydown', e => { if (e.key === 'Enter') build($('input').value); });
-$('run').addEventListener('click', () => setRunning(!running));
-$('tame').addEventListener('click', () => setWireRunning(!wireRunning));
+$('tame').addEventListener('click', () => { if (phase === 'taming') { phase = 'idle'; showButtons(); showStatus(); } else startTaming(); });
 $('drag').addEventListener('click', () => setDrag(!state.drag));
-bindRange('brush', 'brush', v => v.toFixed(2), () => {});
-$('wire-restart').addEventListener('click', () => { if (wire) { Wire.restart(wire); setWireRunning(true); } });
-$('alpha').value = state.alpha; $('alpha').addEventListener('change', e => { state.alpha = Number(e.target.value); });
-$('step-once').addEventListener('click', () => { setRunning(false); relaxOnce(); });
+$('soap').addEventListener('click', () => setSoap(!soap()));
 $('reset-surface').addEventListener('click', resetSurface);
 const drawer = $('drawer'), tabs = [...drawer.querySelectorAll('.tab')];
 let openSection = null;
@@ -362,27 +485,30 @@ function bindRange(id, key, show, onChange) {
   el.addEventListener('change', () => onChange('change'));
 }
 function bindCheck(id, key, onChange) { const el = $(id); el.checked = state[key]; el.addEventListener('change', () => { state[key] = el.checked; onChange(); requestRender(); }); }
-const rebuild = kind => { if (kind === 'change' && lastText !== null && mesh) build(lastText, { keepView: true }); };
+const rebuild = kind => { if (kind === 'change' && lastText && mesh) build(lastText, { keepView: true }); };
 bindRange('spacing', 'spacing', v => v.toFixed(2), rebuild);
 bindRange('bandwidth', 'bandwidth', v => v.toFixed(1), rebuild);
 bindRange('bulge', 'bulge', v => v.toFixed(1), rebuild);
 bindRange('angular', 'angular', v => v, rebuild);
 bindRange('round', 'round', v => v.toFixed(2), rebuild);
-$('rebuild').addEventListener('click', () => { if (lastText !== null) build(lastText, { keepView: true }); });
+bindCheck('auto', 'auto', () => {});
+$('rebuild').addEventListener('click', () => { if (lastText) build(lastText, { keepView: true }); });
+$('alpha').value = state.alpha; $('alpha').addEventListener('change', e => { state.alpha = Number(e.target.value); });
 bindRange('kh', 'kh', v => Math.pow(10, v).toPrecision(2), () => {});
-bindRange('dt0', 'dt0', v => v.toFixed(2), () => {});
-bindRange('gamma', 'gamma', v => v.toFixed(2), () => {});
-bindRange('decay', 'decay', v => v.toFixed(4), () => {});
-bindRange('wiresteps', 'wiresteps', v => v, () => {});
-bindRange('wirestop', 'wirestop', v => '10^' + v, () => {});
-bindRange('dt', 'dt', v => v >= 3.05 ? '∞ (harmonic)' : Math.pow(10, v).toPrecision(2), () => {});
-bindCheck('flips', 'flips', () => {});
-bindRange('tangential', 'tangential', v => v.toFixed(2), () => {});
+bindRange('dclose', 'dclose', v => v.toFixed(2), () => {});
+bindRange('maxsteps', 'maxsteps', v => v, () => {});
+bindRange('brush', 'brush', v => v.toFixed(2), () => {});
+bindRange('every', 'every', v => v, () => { if (settle) settle.every = state.every; });
+bindRange('tangential', 'tangential', v => v.toFixed(2), () => { if (settle) settle.tangential = state.tangential; });
 bindRange('perframe', 'perframe', v => v, () => {});
 bindRange('stop', 'stop', v => '10^' + v, () => {});
-$('coloring').value = state.coloring; $('coloring').addEventListener('change', e => { state.coloring = e.target.value; applyColoring(); });
+$('coloring').value = state.coloring; $('coloring').addEventListener('change', e => { state.coloring = e.target.value; $('soap').classList.toggle('active', soap()); $('soap').setAttribute('aria-pressed', String(soap())); applyColoring(); });
 bindRange('opacity', 'opacity', v => v.toFixed(2), applyOpacity);
 bindCheck('wireframe', 'wireframe', applyOpacity);
+bindRange('soapmin', 'soapmin', v => v, kind => { if (kind === 'change' && soap()) computeThickness(); });
+bindRange('soapmax', 'soapmax', v => v, kind => { if (kind === 'change' && soap()) computeThickness(); });
+bindRange('soapopacity', 'soapopacity', v => v.toFixed(2), applyOpacity);
+bindRange('envbright', 'envbright', v => v.toFixed(1), applyOpacity);
 bindCheck('wire', 'wire', () => { if (wireGroup) wireGroup.visible = state.wire; });
 bindRange('thick', 'thick', v => v.toFixed(3), kind => { if (kind === 'change') buildWire(); });
 bindCheck('ghost', 'ghost', () => { if (ghostMesh) ghostMesh.visible = state.ghost; });
@@ -391,7 +517,7 @@ $('reset-view').addEventListener('click', () => { if (mesh) sizeRadius = Math.ma
 $('snapshot').addEventListener('click', () => { renderer.render(scene, camera); const a = document.createElement('a'); a.href = renderer.domElement.toDataURL('image/png'); a.download = 'seifert-surface.png'; document.body.appendChild(a); a.click(); a.remove(); });
 $('share').addEventListener('click', async () => { const url = shareLink(); try { await navigator.clipboard.writeText(url); $('share').textContent = 'Copied'; setTimeout(() => $('share').textContent = 'Copy link', 1200); } catch (e) { prompt('Link:', url); } });
 setTimeout(() => { $('hint').hidden = true; }, 9000);
-window.SEIFERT_DEBUG = { state, get mesh() { return mesh; }, get wire() { return wire; }, build, relaxOnce, tameOnce, setRunning, setWireRunning, render: () => renderer.render(scene, camera), canvas: renderer.domElement, Seifert, Minimal, Wire };
+window.SEIFERT_DEBUG = { state, get mesh() { return mesh; }, get wire() { return wire; }, get phase() { return phase; }, build, startTaming, startSettling, setSoap, render: () => renderer.render(scene, camera), canvas: renderer.domElement, Seifert, Minimal, Wire };
 const initial = decodeURIComponent((location.hash || '').slice(1));
 build(initial || '3_1');
 })();

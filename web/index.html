@@ -14,16 +14,11 @@
   <button id="build" class="primary">Build</button>
   <select id="examples" title="Examples"><option value="">Examples…</option></select>
   <div id="flowbar">
-    <button id="tame" type="button" class="primary" aria-label="run or pause the taming of the wire" title="Relax the wire itself with Scharein's KnotPlot forces; the surface follows as a rubber sheet">▶ Tame wire</button>
-    <button id="run" type="button" class="primary" aria-label="run or pause the relaxation" title="Relax the surface to the soap film on the wire">▶ Relax film</button>
-    <button id="drag" type="button" aria-pressed="false" title="Drag the wire with the pointer; the surface follows">✋ Drag wire</button>
-    <button id="step-once" type="button">Step</button>
-    <button id="reset-surface" type="button" title="Back to the stacked disks and bands">Reset</button>
-    <span class="lbl">iteration</span><span id="v-iter" class="val">0</span>
-    <span class="lbl">area</span><span id="v-area" class="val">–</span>
-    <span class="lbl" title="root mean square of the discrete mean curvature |H| over the interior vertices, times the disk radius">rms <span class="tex">|H|</span></span><span id="v-h" class="val">–</span>
-    <span class="lbl" title="largest vertex displacement in the last round, in disk radii">moved</span><span id="v-moved" class="val">–</span>
-    <span class="lbl" title="steps of the wire's relaxation, and its length relative to the starting wire">wire</span><span id="v-wire" class="val">–</span>
+    <button id="tame" type="button" class="primary" aria-label="tame the wire again, or pause" title="Relax the wire as a knot (Scharein's KnotPlot forces), the film following; the wire starts tame, this is for after bending it">▶ Tame wire</button>
+    <button id="drag" type="button" aria-pressed="false" title="Drag a point of the wire with the pointer; the film follows">✋ Drag wire</button>
+    <button id="soap" type="button" aria-pressed="false" title="Render the surface as a soap film: thin-film interference from a thickness field">◐ Soap film</button>
+    <button id="reset-surface" type="button" title="Back to the stacked disks and bands, then tame and settle again">Reset</button>
+    <span id="status" class="val"></span>
   </div>
   <div id="info"></div>
 </div>
@@ -37,47 +32,49 @@
   <div id="panel">
     <section id="section-surface">
       <h3>The starting surface</h3>
-      <p class="help">One disk per strand, stacked along the braid axis, one half-twisted band per crossing: the Bennequin surface of the closed braid. Its boundary is the wire, which never moves again.</p>
+      <p class="help">One disk per strand, stacked along the braid axis, one half-twisted band per crossing: the Bennequin surface of the closed braid. Its boundary is the wire. On Build the wire is tamed and the film settled on it; untick <b>tame on build</b> to see the scaffold instead.</p>
       <label>Disk spacing (× radius) <span class="val" id="v-spacing"></span><input id="spacing" type="range" min="0.15" max="1.2" step="0.05"></label>
       <label title="At most 0.8 of the sector between crossings">Band width (× spacing) <span class="val" id="v-bandwidth"></span><input id="bandwidth" type="range" min="0.3" max="3" step="0.1"></label>
       <label>Band bulge (× band width) <span class="val" id="v-bulge"></span><input id="bulge" type="range" min="0.5" max="2" step="0.1"></label>
       <label>Rim points <span class="val" id="v-angular"></span><input id="angular" type="range" min="48" max="400" step="8"></label>
-      <label title="The corners of the boundary polygon are rounded at this radius (binomial smoothing, then equal spacing) before it is fixed">Wire rounding (× radius) <span class="val" id="v-round"></span><input id="round" type="range" min="0" max="0.3" step="0.01"></label>
+      <label title="The corners of the boundary polygon are rounded at this radius before anything else">Wire rounding (× radius) <span class="val" id="v-round"></span><input id="round" type="range" min="0" max="0.3" step="0.01"></label>
+      <label>Tame on build <input id="auto" type="checkbox"></label>
       <div class="row"><button id="rebuild">Rebuild</button></div>
     </section>
     <section id="section-wire" hidden>
       <h3>Taming the wire</h3>
-      <p class="help">Scharein's KnotPlot forces, as van Wijk and Cohen use them: each point of the wire is pulled by its two neighbours (<span class="tex">F_a = H\,r^{1+\beta}</span>) and pushed by every other point (<span class="tex">F_r = K\,r^{-(2+\alpha)}</span>), damped, and a move that would bring a strand within reach of another is refused, so the knot type cannot change. The surface follows as a rubber sheet, by the harmonic extension of the wire's motion. The wire grows while it relaxes.</p>
+      <p class="help">Scharein's KnotPlot forces, as van Wijk and Cohen use them: each point of the wire is pulled by its two neighbours (<span class="tex">F_a = H\,r^{1+\beta}</span>) and pushed by every other point (<span class="tex">F_r = K\,r^{-(2+\alpha)}</span>), damped, and a move that would bring a strand within reach of another is refused, so the knot type cannot change. The film follows. The wire grows while it relaxes.</p>
       <label>Repulsion <select id="alpha"><option value="0">weak (α = 0, inverse square)</option><option value="4">strong (α = 4)</option></select></label>
       <label title="K/H, the repulsion relative to the springs">Repulsion strength <span class="val" id="v-kh"></span><input id="kh" type="range" min="-1" max="1" step="0.1"></label>
-      <label title="The first step of a cycle; each step is (1 - decay) times the previous">Step <span class="val" id="v-dt0"></span><input id="dt0" type="range" min="0.02" max="0.3" step="0.01"></label>
-      <label>Damping <span class="val" id="v-gamma"></span><input id="gamma" type="range" min="0.02" max="0.5" step="0.01"></label>
-      <label>Step decay <span class="val" id="v-decay"></span><input id="decay" type="range" min="0" max="0.005" step="0.0001"></label>
-      <label>Wire steps per tick <span class="val" id="v-wiresteps"></span><input id="wiresteps" type="range" min="1" max="50" step="1"></label>
-      <label title="Stop when the largest move of a wire point in a step is below this, in disk radii">Stop when moved &lt; <span class="val" id="v-wirestop"></span><input id="wirestop" type="range" min="-7" max="-3" step="0.5"></label>
-      <div class="row"><button id="wire-restart" title="Start a new cycle from the full step">New cycle</button></div>
+      <label title="Strands may not come closer than this many spacings of the coarse wire">Clearance (× spacing) <span class="val" id="v-dclose"></span><input id="dclose" type="range" min="0.5" max="4" step="0.25"></label>
+      <label title="A cycle stops when the energy has stopped falling, or here">Steps at most <span class="val" id="v-maxsteps"></span><input id="maxsteps" type="range" min="200" max="5000" step="100"></label>
       <h3>By hand</h3>
-      <p class="help">With <b>Drag wire</b> on, drag a point of the wire; it moves in the plane facing you, its neighbours along the loop with it, and the surface follows. Nothing stops a strand from being pushed through another here.</p>
+      <p class="help">With <b>Drag wire</b> on, drag a point of the wire; it moves in the plane facing you, its neighbours along the loop with it, and the film follows. Nothing stops a strand from being pushed through another here; <b>Tame wire</b> afterwards relaxes it again.</p>
       <label title="Width of the Gaussian falloff along the loop, as a fraction of the loop's length">Brush (× loop length) <span class="val" id="v-brush"></span><input id="brush" type="range" min="0.01" max="0.3" step="0.01"></label>
     </section>
     <section id="section-flow" hidden>
       <h3>The film</h3>
-      <p class="help">Each round freezes the metric of the mesh and solves the Laplace equation <span class="tex">\Delta x = 0</span> for the interior vertices with the wire as boundary data (Pinkall–Polthier); with a finite step it is implicit mean curvature flow. The area decreases every round; the fixed point is the discrete minimal surface.</p>
-      <label title="∞ is the harmonic step; smaller steps are mean curvature flow with dt = step × (mean edge length)²">Step (× mean edge²) <span class="val" id="v-dt"></span><input id="dt" type="range" min="-1" max="3.1" step="0.1"></label>
-      <label title="Flip interior edges to the intrinsic Delaunay triangulation after each round">Delaunay edge flips <input id="flips" type="checkbox"></label>
+      <p class="help">The surface shown is the soap film on the wire, kept settled: implicit mean curvature flow with a growing step, then the harmonic step (Pinkall–Polthier), remeshing and tangential smoothing between rounds. It starts again whenever the wire moves.</p>
+      <label>Remesh every (rounds) <span class="val" id="v-every"></span><input id="every" type="range" min="1" max="20" step="1"></label>
       <label title="Move each interior vertex a fraction of the way to the centroid of its neighbours, within the tangent plane">Tangential smoothing <span class="val" id="v-tangential"></span><input id="tangential" type="range" min="0" max="0.8" step="0.05"></label>
       <label>Rounds per tick <span class="val" id="v-perframe"></span><input id="perframe" type="range" min="1" max="10" step="1"></label>
-      <label title="Stop when the area decreased by less than this fraction of itself over the last five rounds">Stop when the area change &lt; <span class="val" id="v-stop"></span><input id="stop" type="range" min="-10" max="-3" step="0.5"></label>
+      <label title="Settled when the area decreased by less than this fraction of itself over the last five rounds">Settled when the area change &lt; <span class="val" id="v-stop"></span><input id="stop" type="range" min="-10" max="-3" step="0.5"></label>
     </section>
     <section id="section-display" hidden>
       <h3>Display</h3>
-      <label>Coloring <select id="coloring"><option value="sides">two sides</option><option value="parts">disks and bands</option><option value="curvature">mean curvature</option></select></label>
+      <label>Coloring <select id="coloring"><option value="sides">two sides</option><option value="parts">disks and bands</option><option value="curvature">mean curvature</option><option value="soap">soap film</option></select></label>
       <label>Opacity <span class="val" id="v-opacity"></span><input id="opacity" type="range" min="0.05" max="1" step="0.05"></label>
       <label>Wireframe <input id="wireframe" type="checkbox"></label>
+      <h3>Soap film</h3>
+      <p class="help">Thin-film interference from a per-vertex thickness in nanometres (thick at the bottom and at the wire, thin at the top, gently uneven), through three.js's iridescence model; the film goes black where it is thinnest.</p>
+      <label>Thinnest (nm) <span class="val" id="v-soapmin"></span><input id="soapmin" type="range" min="0" max="400" step="10"></label>
+      <label>Thickest (nm) <span class="val" id="v-soapmax"></span><input id="soapmax" type="range" min="200" max="1500" step="10"></label>
+      <label title="How much of the background the film hides face-on; it hides more at grazing angles">Film opacity <span class="val" id="v-soapopacity"></span><input id="soapopacity" type="range" min="0" max="1" step="0.05"></label>
+      <label>Environment light <span class="val" id="v-envbright"></span><input id="envbright" type="range" min="0.2" max="3" step="0.1"></label>
       <h3>Show</h3>
       <label>The wire (the knot) <input id="wire" type="checkbox"></label>
       <label>Wire thickness (× radius) <span class="val" id="v-thick"></span><input id="thick" type="range" min="0.005" max="0.06" step="0.005"></label>
-      <label title="The starting surface, as a faint wireframe">Starting surface <input id="ghost" type="checkbox"></label>
+      <label title="The starting scaffold, as a faint wireframe">Starting surface <input id="ghost" type="checkbox"></label>
       <label>Axes <input id="axes" type="checkbox"></label>
       <div class="row"><button id="reset-view">Reset view</button><button id="snapshot">PNG</button><button id="share">Copy link</button></div>
     </section>

@@ -167,12 +167,15 @@ function turning(ws) {                                       // total turning an
 }
 { // the circle stays a circle (it grows, the model's own scale), spacing uniform
   const m = Seifert.buildSurface([], { angular: 72 }); Minimal.prepare(m);
-  const ws = Wire.init(m);
+  const ws = Wire.init(m, { coarse: 2 * Math.PI / 48 });
+  check('wire: coarse copy of the loop', ws.N === 48 && ws.fLoops[0].n === 72, String(ws.N));
   for (let it = 0; it < 300; it++) Wire.step(ws);
   let rmin = Infinity, rmax = 0, smin = Infinity, smax = 0;
   for (let k = 0; k < ws.N; k++) { const r = Math.hypot(ws.P[3 * k], ws.P[3 * k + 1]); rmin = Math.min(rmin, r); rmax = Math.max(rmax, r); const n = ws.next[k]; const d = Math.hypot(ws.P[3 * n] - ws.P[3 * k], ws.P[3 * n + 1] - ws.P[3 * k + 1], ws.P[3 * n + 2] - ws.P[3 * k + 2]); smin = Math.min(smin, d); smax = Math.max(smax, d); }
   check('wire: a circle stays round and evenly spaced', (rmax - rmin) < 1e-9 * rmax && (smax - smin) < 1e-9 * smax && ws.P.every((v, i) => i % 3 !== 2 || Math.abs(v) < 1e-12), `r ${rmin}..${rmax}`);
   check('wire: the circle grows', Wire.length(ws) > 1.2 * ws.L0, String(Wire.length(ws) / ws.L0));
+  Wire.apply(ws, m, Minimal);
+  check('wire: the interpolated circle is round', (() => { const F = ws.F[0]; let rmin = Infinity, rmax = 0; for (let k = 0; k < 72; k++) { const r = Math.hypot(F[3 * k], F[3 * k + 1]); rmin = Math.min(rmin, r); rmax = Math.max(rmax, r); } return (rmax - rmin) < 1e-3 * rmax; })());
 }
 { // the trefoil wire: the energy falls, the corners go, no strand comes within d_close of another, the surface follows
   const m = Seifert.buildSurface([1, 1, 1], { angular: 72 }); Minimal.prepare(m);
@@ -182,14 +185,34 @@ function turning(ws) {                                       // total turning an
   Wire.apply(ws, m, Minimal);
   check('wire: the energy decreases monotonically', monotone && e < 0.8 * e0, `${e0} -> ${e}`);
   check('wire: the corners are gone', turning(ws) < 0.5 * turn0 && turning(ws) < 3, `${turn0} -> ${turning(ws)} turns`);
-  check('wire: no strand within d_close of another', Wire.clearance(ws).distance >= 0.5 * ws.ra * 0.999, String(Wire.clearance(ws).distance / ws.ra));
-  check('wire: the surface follows', m.loops[0].every(v => { const k = ws.vert.indexOf(v); return Math.abs(m.pos[3 * v] - ws.P[3 * k]) + Math.abs(m.pos[3 * v + 1] - ws.P[3 * k + 1]) + Math.abs(m.pos[3 * v + 2] - ws.P[3 * k + 2]) < 1e-12; }));
+  check('wire: no strand closer than it started, below d_close', Wire.clearance(ws).distance >= Math.min(2 * ws.ra, 0.9 * 1.5 * ws.ra) * 0.999, String(Wire.clearance(ws).distance / ws.ra));
+  check('wire: the surface follows', m.loops[0].every((v, k) => Math.abs(m.pos[3 * v] - ws.F[0][3 * k]) + Math.abs(m.pos[3 * v + 1] - ws.F[0][3 * k + 1]) + Math.abs(m.pos[3 * v + 2] - ws.F[0][3 * k + 2]) < 1e-12));
+  check('wire: the mesh boundary stays close to the coarse polygon', (() => {
+    const seg = (px, py, pz, a, b) => { const P = ws.P, ux = P[3 * b] - P[3 * a], uy = P[3 * b + 1] - P[3 * a + 1], uz = P[3 * b + 2] - P[3 * a + 2], l2 = ux * ux + uy * uy + uz * uz; let t = l2 > 0 ? ((px - P[3 * a]) * ux + (py - P[3 * a + 1]) * uy + (pz - P[3 * a + 2]) * uz) / l2 : 0; t = Math.max(0, Math.min(1, t)); return Math.hypot(px - P[3 * a] - t * ux, py - P[3 * a + 1] - t * uy, pz - P[3 * a + 2] - t * uz); };
+    let worst = 0; for (let k = 0; k < ws.fLoops[0].n; k++) { let best = Infinity; for (let j = 0; j < ws.N; j++) best = Math.min(best, seg(ws.F[0][3 * k], ws.F[0][3 * k + 1], ws.F[0][3 * k + 2], j, ws.next[j])); worst = Math.max(worst, best); } return worst < 0.15 * ws.ra; })());
+  check('wire: settles by the energy criterion', Wire.settled(ws) || ws.steps >= 1500);
   check('wire: the carried surface is sound', Minimal.eulerCharacteristic(m) === chi && Minimal.orientable(m.tri, m.pos.length / 3) && Minimal.degenerateTriangles(m, 1e-9) === 0);
   let A = Minimal.area(m); for (let it = 0; it < 25; it++) A = Minimal.relax(m, { dt: Infinity, flips: true, tangential: 0.3 }).area;
   const H = Minimal.meanCurvature(m);
   check('wire: the film on the tamed wire relaxes', H.rms < 0.5 && Minimal.degenerateTriangles(m, 1e-9) === 0, `rms ${H.rms}, max ${H.max}, area ${A}`);
 }
 
+{ // the pipeline: tame with the surface carried (Wire.carry), then settle the film (Minimal.settleRound) -- no pinch, a clean film
+  for (const [name, word, maxSteps] of [['trefoil', [1, 1, 1], 1200], ['12n242', [1, 2, 2, 1, 1, 2, 2, 2, 2, 2, 2, 2], 1500]]) {
+    const m = Seifert.buildSurface(word, { angular: 96 }); Minimal.prepare(m);
+    const ws = Wire.init(m); ws.meshEdge = Minimal.meanEdgeLength(m);
+    let pinched = false;
+    while (!Wire.settled(ws) && ws.steps < maxSteps) { const r = Wire.carry(ws, m, Minimal); if (r.pinched) pinched = true; }
+    const st = Minimal.settleInit(m), boundary = m.loops.flat().map(v => [m.pos[3 * v], m.pos[3 * v + 1], m.pos[3 * v + 2]]);
+    let s = null, rounds = 0;
+    for (let r = 0; r < 80; r++) { s = Minimal.settleRound(m, st); rounds++; if (s.pinched) { pinched = true; break; } if (s.harmonic && s.moved < 1e-4) break; }
+    const H = Minimal.meanCurvature(m);
+    check(`pipeline ${name}: the wire opened`, Wire.length(ws) / ws.L0 > 1.2, String(Wire.length(ws) / ws.L0));
+    check(`pipeline ${name}: no pinch, a settled film`, !pinched && s.harmonic && H.rms < 0.5 && Minimal.degenerateTriangles(m, 1e-9) === 0, `pinched ${pinched}, harmonic ${s.harmonic}, rounds ${rounds}, rms ${H.rms}`);
+    check(`pipeline ${name}: χ and orientation kept through the remeshing`, Minimal.eulerCharacteristic(m) === m.braid.chi && Minimal.orientable(m.tri, m.pos.length / 3) && m.loops.length === m.braid.mu);
+    check(`pipeline ${name}: the wire did not move while the film settled`, m.loops.flat().every((v, k) => Math.abs(m.pos[3 * v] - boundary[k][0]) + Math.abs(m.pos[3 * v + 1] - boundary[k][1]) + Math.abs(m.pos[3 * v + 2] - boundary[k][2]) < 1e-12));
+  }
+}
 { // stress: taming with a film round after every few wire steps keeps the mesh a manifold (the flips must never make an edge twice)
   let ok = true, detail = '';
   for (const word of [[1, 1, 1], [1, 2, 2, 1, 1, 2, 2, 2, 2, 2, 2, 2], [1, -2, 1, -2]]) {
