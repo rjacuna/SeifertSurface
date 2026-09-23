@@ -160,7 +160,7 @@ from the physically based model, a painted room as the environment (prefiltered 
 background, the film's opacity to what lies behind it rising with the Fresnel term at grazing angles, the reflected
 light added unweighted, and the film's triangles sorted back to front for the current view whenever the camera or
 the surface moves (its index buffer rewritten), so that where one sheet of the film lies behind another the blend
-is in depth order rather than mesh order. The wire becomes dark metal. It is rasterised, not
+is in depth order rather than mesh order. The wire becomes gold (or steel, or dark metal, in the Display tab). It is rasterised, not
 ray-traced: for an interactive viewer this is the right baseline, and the mesh can be exported to a path tracer for
 a still. The thickness range, the opacity and the light are in the Display tab.
 

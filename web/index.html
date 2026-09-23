@@ -66,11 +66,12 @@
       <label>Opacity <span class="val" id="v-opacity"></span><input id="opacity" type="range" min="0.05" max="1" step="0.05"></label>
       <label>Wireframe <input id="wireframe" type="checkbox"></label>
       <h3>Soap film</h3>
-      <p class="help">Thin-film interference from a per-vertex thickness in nanometres (thick at the bottom and at the wire, thin at the top, gently uneven), through three.js's iridescence model; the film goes black where it is thinnest.</p>
+      <p class="help">Thin-film interference from a per-vertex thickness in nanometres (thick at the bottom and at the wire, thin at the top, gently uneven): the colour of a free water film of that thickness, computed over the visible spectrum (Newton's series); the film goes black where it is thinnest.</p>
       <label>Thinnest (nm) <span class="val" id="v-soapmin"></span><input id="soapmin" type="range" min="0" max="400" step="10"></label>
       <label>Thickest (nm) <span class="val" id="v-soapmax"></span><input id="soapmax" type="range" min="200" max="1500" step="10"></label>
       <label title="How much of the background the film hides face-on; it hides more at grazing angles">Film opacity <span class="val" id="v-soapopacity"></span><input id="soapopacity" type="range" min="0" max="1" step="0.05"></label>
       <label>Environment light <span class="val" id="v-envbright"></span><input id="envbright" type="range" min="0.2" max="3" step="0.1"></label>
+      <label>Wire <select id="wiremetal"><option value="gold">gold</option><option value="steel">steel</option><option value="dark">dark metal</option></select></label>
       <h3>Show</h3>
       <label>The wire (the knot) <input id="wire" type="checkbox"></label>
       <label>Wire thickness (× radius) <span class="val" id="v-thick"></span><input id="thick" type="range" min="0.005" max="0.06" step="0.005"></label>

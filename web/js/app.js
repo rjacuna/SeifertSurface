@@ -12,7 +12,7 @@ const state = { spacing: 0.45, bandwidth: 1.2, bulge: 0.7, angular: isMobile ? 9
                 alpha: 0, kh: 0, dclose: 2, maxsteps: 2500, brush: 0.08, drag: false,          // the wire: kh is log10 of K/H
                 every: 5, tangential: 0.3, perframe: 2, stop: -7,                                // the film
                 coloring: 'sides', opacity: 1, wireframe: false, wire: true, thick: 0.02, ghost: false, axes: false,
-                soapmin: 100, soapmax: 800, soapopacity: 0.35, envbright: 2.5 };
+                soapmin: 100, soapmax: 800, soapopacity: 0.35, envbright: 2.5, wiremetal: 'gold' };
 let mesh = null, scaffold = null, wire = null, record = null, lastText = '', sizeRadius = 2;
 let phase = 'idle', settle = null, areas = [], lastStats = null, remarks = [];   // phase: idle | taming | settling
 const soap = () => state.coloring === 'soap';
@@ -162,7 +162,10 @@ function makeSoapMaterial(side) {
 // so that where one sheet of the film lies behind another the blend is in the right order.
 const soapMaterial = makeSoapMaterial(THREE.DoubleSide);
 const WIRE_COLORS = [0x2d4f9e, 0xb3261e, 0xd08a00, 0x5b2a86, 0x0b7a75, 0x7a4a00];
-const wireMetal = new THREE.MeshStandardMaterial({ color: 0x3a3d42, metalness: 0.9, roughness: 0.35 });
+// the wire in the soap-film picture: gold by default (its colour is the metal's reflectance, tinting the room it
+// reflects), or steel
+const WIRE_METALS = { gold: new THREE.MeshStandardMaterial({ color: 0xffc860, metalness: 1, roughness: 0.22 }), steel: new THREE.MeshStandardMaterial({ color: 0xb8bcc4, metalness: 1, roughness: 0.3 }), dark: new THREE.MeshStandardMaterial({ color: 0x3a3d42, metalness: 0.9, roughness: 0.35 }) };
+const wireMetal = () => WIRE_METALS[state.wiremetal] || WIRE_METALS.gold;
 const group = new THREE.Group(); scene.add(group);
 let surfaceGeom = null, frontMesh = null, backMesh = null, soapMesh = null, ghostMesh = null, wireGroup = null, axesGroup = null, tubeMaterials = [];
 const SERIF = '"STIX Two Text", "STIX Two Math", "Times New Roman", Times, serif';
@@ -193,7 +196,7 @@ function buildWire() {
     const tube = new THREE.TubeGeometry(curve, Math.min(1200, 2 * pts.length), state.thick, 10, true);
     const mat = new THREE.MeshPhongMaterial({ color: WIRE_COLORS[k % WIRE_COLORS.length], shininess: 50, specular: new THREE.Color(0x333344) });
     tubeMaterials.push(mat);
-    wireGroup.add(new THREE.Mesh(tube, soap() ? wireMetal : mat));
+    wireGroup.add(new THREE.Mesh(tube, soap() ? wireMetal() : mat));
   });
   wireGroup.visible = state.wire; group.add(wireGroup);
 }
@@ -237,7 +240,7 @@ function applyColoring() {
   frontMesh.visible = backMesh.visible = !s; soapMesh.visible = s; sortedFor = null;
   renderer.setClearColor(0xffffff, 1); scene.background = s ? envTexture : null;
   ambient.intensity = s ? 0.25 : 0.55;
-  if (wireGroup) wireGroup.children.forEach((m, k) => { m.material = s ? wireMetal : tubeMaterials[k]; });
+  if (wireGroup) wireGroup.children.forEach((m, k) => { m.material = s ? wireMetal() : tubeMaterials[k]; });
   for (const m of [frontMaterial, backMaterial]) { m.vertexColors = vertexColors; m.needsUpdate = true; }
   frontMaterial.color.set(vertexColors ? 0xffffff : FRONT); backMaterial.color.set(vertexColors ? 0xffffff : BACK);
   if (vertexColors) {
@@ -533,6 +536,7 @@ bindRange('soapmin', 'soapmin', v => v, kind => { if (kind === 'change' && soap(
 bindRange('soapmax', 'soapmax', v => v, kind => { if (kind === 'change' && soap()) computeThickness(); });
 bindRange('soapopacity', 'soapopacity', v => v.toFixed(2), applyOpacity);
 bindRange('envbright', 'envbright', v => v.toFixed(1), applyOpacity);
+$('wiremetal').value = state.wiremetal; $('wiremetal').addEventListener('change', e => { state.wiremetal = e.target.value; if (wireGroup && soap()) wireGroup.children.forEach(m => { m.material = wireMetal(); }); requestRender(); });
 bindCheck('wire', 'wire', () => { if (wireGroup) wireGroup.visible = state.wire; });
 bindRange('thick', 'thick', v => v.toFixed(3), kind => { if (kind === 'change') buildWire(); });
 bindCheck('ghost', 'ghost', () => { if (ghostMesh) ghostMesh.visible = state.ghost; });
