@@ -10,9 +10,11 @@ and the film follows, tame it again when it is bent too much. Alongside, it read
 the Seifert matrix, the Alexander polynomial, the signature, the genus. A soap-film rendering shows it as a real
 film would look, thin-film interference and all.
 
-It is a single-page web app in the shape of [EllipticCurve3D](../EllipticCurve3D): `web/index.html` with `js/`, `css/`
-and `data/`, three.js and KaTeX vendored, no build step; the mathematics in two dependency-free modules that also run
-under Node for the tests.
+It is a single-page web app in the shape of [EllipticCurve3D](https://github.com/rjacuna/EllipticCurve3D):
+`web/index.html` with `js/`, `css/` and `data/`, three.js and KaTeX vendored, no build step; the mathematics in three
+dependency-free modules that also run under Node for the tests.
+
+It is live at **https://rjacuna.github.io/SeifertSurface/**; to run it locally, serve the folder and open it.
 
 ```bash
 python3 -m http.server -d ~/Projects/SeifertSurface/web 8766      # then http://localhost:8766/
@@ -296,6 +298,14 @@ covers, and Seifert's theorem says every palindromic integer polynomial with `Δ
 of some knot; the notebooks `Friedl's Algorithm.ipynb` in `~/Projects/Lehmer` build a Seifert matrix from the
 coefficients of such a polynomial (Seifert's inductive construction), which is the input the planned
 surface-from-a-Seifert-matrix builder below would take.
+
+## Deployment
+
+`.github/workflows/pages.yml` publishes `web/` to GitHub Pages on every push to `master` (the Pages source is
+"GitHub Actions"), so the site is whatever the working tree's `web/` holds; there is no build step. The whole site is
+about 2 MB, the largest file `web/data/knots.json` at 0.7 MB, so nothing is near GitHub's limits. Opening
+`index.html` from the file system works for typed braid words, but browsers block the fetch of the knot table from
+`file://`, so names such as `12n242` need the page served over http.
 
 ## Tests
 
