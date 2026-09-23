@@ -14,20 +14,23 @@
   <button id="build" class="primary">Build</button>
   <select id="examples" title="Examples"><option value="">Examples…</option></select>
   <div id="flowbar">
-    <button id="run" type="button" class="primary" aria-label="run or pause the relaxation">▶ Relax</button>
+    <button id="tame" type="button" class="primary" aria-label="run or pause the taming of the wire" title="Relax the wire itself with Scharein's KnotPlot forces; the surface follows as a rubber sheet">▶ Tame wire</button>
+    <button id="run" type="button" class="primary" aria-label="run or pause the relaxation" title="Relax the surface to the soap film on the wire">▶ Relax film</button>
     <button id="step-once" type="button">Step</button>
     <button id="reset-surface" type="button" title="Back to the stacked disks and bands">Reset</button>
     <span class="lbl">iteration</span><span id="v-iter" class="val">0</span>
     <span class="lbl">area</span><span id="v-area" class="val">–</span>
     <span class="lbl" title="root mean square of the discrete mean curvature |H| over the interior vertices, times the disk radius">rms <span class="tex">|H|</span></span><span id="v-h" class="val">–</span>
     <span class="lbl" title="largest vertex displacement in the last round, in disk radii">moved</span><span id="v-moved" class="val">–</span>
+    <span class="lbl" title="steps of the wire's relaxation, and its length relative to the starting wire">wire</span><span id="v-wire" class="val">–</span>
   </div>
   <div id="info"></div>
 </div>
 <aside id="drawer" aria-label="Options">
   <div class="tabs">
     <button class="tab" type="button" data-section="surface" aria-controls="section-surface" aria-expanded="false">Surface</button>
-    <button class="tab" type="button" data-section="flow" aria-controls="section-flow" aria-expanded="false">Flow</button>
+    <button class="tab" type="button" data-section="wire" aria-controls="section-wire" aria-expanded="false">Wire</button>
+    <button class="tab" type="button" data-section="flow" aria-controls="section-flow" aria-expanded="false">Film</button>
     <button class="tab" type="button" data-section="display" aria-controls="section-display" aria-expanded="false">Display</button>
   </div>
   <div id="panel">
@@ -41,8 +44,20 @@
       <label title="The corners of the boundary polygon are rounded at this radius (binomial smoothing, then equal spacing) before it is fixed">Wire rounding (× radius) <span class="val" id="v-round"></span><input id="round" type="range" min="0" max="0.3" step="0.01"></label>
       <div class="row"><button id="rebuild">Rebuild</button></div>
     </section>
+    <section id="section-wire" hidden>
+      <h3>Taming the wire</h3>
+      <p class="help">Scharein's KnotPlot forces, as van Wijk and Cohen use them: each point of the wire is pulled by its two neighbours (<span class="tex">F_a = H\,r^{1+\beta}</span>) and pushed by every other point (<span class="tex">F_r = K\,r^{-(2+\alpha)}</span>), damped, and a move that would bring a strand within reach of another is refused, so the knot type cannot change. The surface follows as a rubber sheet, by the harmonic extension of the wire's motion. The wire grows while it relaxes.</p>
+      <label>Repulsion <select id="alpha"><option value="0">weak (α = 0, inverse square)</option><option value="4">strong (α = 4)</option></select></label>
+      <label title="K/H, the repulsion relative to the springs">Repulsion strength <span class="val" id="v-kh"></span><input id="kh" type="range" min="-1" max="1" step="0.1"></label>
+      <label title="The first step of a cycle; each step is (1 - decay) times the previous">Step <span class="val" id="v-dt0"></span><input id="dt0" type="range" min="0.02" max="0.3" step="0.01"></label>
+      <label>Damping <span class="val" id="v-gamma"></span><input id="gamma" type="range" min="0.02" max="0.5" step="0.01"></label>
+      <label>Step decay <span class="val" id="v-decay"></span><input id="decay" type="range" min="0" max="0.005" step="0.0001"></label>
+      <label>Wire steps per tick <span class="val" id="v-wiresteps"></span><input id="wiresteps" type="range" min="1" max="50" step="1"></label>
+      <label title="Stop when the largest move of a wire point in a step is below this, in disk radii">Stop when moved &lt; <span class="val" id="v-wirestop"></span><input id="wirestop" type="range" min="-7" max="-3" step="0.5"></label>
+      <div class="row"><button id="wire-restart" title="Start a new cycle from the full step">New cycle</button></div>
+    </section>
     <section id="section-flow" hidden>
-      <h3>Relaxation</h3>
+      <h3>The film</h3>
       <p class="help">Each round freezes the metric of the mesh and solves the Laplace equation <span class="tex">\Delta x = 0</span> for the interior vertices with the wire as boundary data (Pinkall–Polthier); with a finite step it is implicit mean curvature flow. The area decreases every round; the fixed point is the discrete minimal surface.</p>
       <label title="∞ is the harmonic step; smaller steps are mean curvature flow with dt = step × (mean edge length)²">Step (× mean edge²) <span class="val" id="v-dt"></span><input id="dt" type="range" min="-1" max="3.1" step="0.1"></label>
       <label title="Flip interior edges to the intrinsic Delaunay triangulation after each round">Delaunay edge flips <input id="flips" type="checkbox"></label>
@@ -72,6 +87,7 @@
 <script src="js/vendor/katex.min.js"></script>
 <script src="js/seifert.js"></script>
 <script src="js/minimal.js"></script>
+<script src="js/wire.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

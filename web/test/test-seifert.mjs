@@ -5,6 +5,7 @@ import fs from 'fs';
 const require = createRequire(import.meta.url);
 const Seifert = require('../js/seifert.js');
 const Minimal = require('../js/minimal.js');
+const Wire = require('../js/wire.js');
 const V = JSON.parse(fs.readFileSync(new URL('./vectors.json', import.meta.url)));
 
 let pass = 0, fail = 0; const failures = [];
@@ -155,6 +156,38 @@ meshChecks('unknot, two strands', [1]);
   check('trefoil surface: no degenerate triangles after relaxing', Minimal.degenerateTriangles(m, 1e-9) === 0);
   const H = Minimal.meanCurvature(m);
   check('trefoil surface: mean curvature residual small (rms |H| R < 0.5 after 25 rounds)', H.rms < 0.5, `rms ${H.rms}, max ${H.max}`);
+}
+
+// ---- taming the wire ----
+function turning(ws) {                                       // total turning angle of the wire, in turns
+  let sum = 0; for (let k = 0; k < ws.N; k++) { const p = ws.prev[k], n = ws.next[k], P = ws.P;
+    const ax = P[3 * p] - P[3 * k], ay = P[3 * p + 1] - P[3 * k + 1], az = P[3 * p + 2] - P[3 * k + 2], bx = P[3 * n] - P[3 * k], by = P[3 * n + 1] - P[3 * k + 1], bz = P[3 * n + 2] - P[3 * k + 2];
+    sum += Math.PI - Math.acos(Math.max(-1, Math.min(1, (ax * bx + ay * by + az * bz) / (Math.hypot(ax, ay, az) * Math.hypot(bx, by, bz))))); }
+  return sum / (2 * Math.PI);
+}
+{ // the circle stays a circle (it grows, the model's own scale), spacing uniform
+  const m = Seifert.buildSurface([], { angular: 72 }); Minimal.prepare(m);
+  const ws = Wire.init(m);
+  for (let it = 0; it < 300; it++) Wire.step(ws);
+  let rmin = Infinity, rmax = 0, smin = Infinity, smax = 0;
+  for (let k = 0; k < ws.N; k++) { const r = Math.hypot(ws.P[3 * k], ws.P[3 * k + 1]); rmin = Math.min(rmin, r); rmax = Math.max(rmax, r); const n = ws.next[k]; const d = Math.hypot(ws.P[3 * n] - ws.P[3 * k], ws.P[3 * n + 1] - ws.P[3 * k + 1], ws.P[3 * n + 2] - ws.P[3 * k + 2]); smin = Math.min(smin, d); smax = Math.max(smax, d); }
+  check('wire: a circle stays round and evenly spaced', (rmax - rmin) < 1e-9 * rmax && (smax - smin) < 1e-9 * smax && ws.P.every((v, i) => i % 3 !== 2 || Math.abs(v) < 1e-12), `r ${rmin}..${rmax}`);
+  check('wire: the circle grows', Wire.length(ws) > 1.2 * ws.L0, String(Wire.length(ws) / ws.L0));
+}
+{ // the trefoil wire: the energy falls, the corners go, no strand comes within d_close of another, the surface follows
+  const m = Seifert.buildSurface([1, 1, 1], { angular: 72 }); Minimal.prepare(m);
+  const chi = Minimal.eulerCharacteristic(m), ws = Wire.init(m), turn0 = turning(ws);
+  let e0 = null, e = null, monotone = true, rejected = 0;
+  for (let it = 0; it < 1500; it++) { const s = Wire.step(ws); if (e0 === null) e0 = s.energy; else if (s.energy > e * (1 + 1e-6)) monotone = false; e = s.energy; rejected += s.rejected; if (it % 100 === 99) Wire.apply(ws, m, Minimal); }
+  Wire.apply(ws, m, Minimal);
+  check('wire: the energy decreases monotonically', monotone && e < 0.8 * e0, `${e0} -> ${e}`);
+  check('wire: the corners are gone', turning(ws) < 0.5 * turn0 && turning(ws) < 3, `${turn0} -> ${turning(ws)} turns`);
+  check('wire: no strand within d_close of another', Wire.clearance(ws).distance >= 0.5 * ws.ra * 0.999, String(Wire.clearance(ws).distance / ws.ra));
+  check('wire: the surface follows', m.loops[0].every(v => { const k = ws.vert.indexOf(v); return Math.abs(m.pos[3 * v] - ws.P[3 * k]) + Math.abs(m.pos[3 * v + 1] - ws.P[3 * k + 1]) + Math.abs(m.pos[3 * v + 2] - ws.P[3 * k + 2]) < 1e-12; }));
+  check('wire: the carried surface is sound', Minimal.eulerCharacteristic(m) === chi && Minimal.orientable(m.tri, m.pos.length / 3) && Minimal.degenerateTriangles(m, 1e-9) === 0);
+  let A = Minimal.area(m); for (let it = 0; it < 25; it++) A = Minimal.relax(m, { dt: Infinity, flips: true, tangential: 0.3 }).area;
+  const H = Minimal.meanCurvature(m);
+  check('wire: the film on the tamed wire relaxes', H.rms < 0.5 && Minimal.degenerateTriangles(m, 1e-9) === 0, `rms ${H.rms}, max ${H.max}, area ${A}`);
 }
 
 console.log(`${pass} passed, ${fail} failed`);

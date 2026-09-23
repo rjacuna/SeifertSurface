@@ -1,11 +1,13 @@
 # SeifertSurface
 
 A Seifert surface for a knot or link `K ⊂ ℝ³` is a compact oriented surface with boundary `K`. This project draws
-one for any closed braid, in two steps. First it builds the classical one, Seifert's algorithm applied to the closed
+one for any closed braid, in three steps. First it builds the classical one, Seifert's algorithm applied to the closed
 braid: one disk per strand stacked along the braid axis, one half-twisted band per crossing (the Bennequin surface).
-Then it takes the boundary of that surface as a fixed wire and relaxes the surface to the minimal surface spanning
-the wire, by solving the minimal surface equation on it: the soap film on a knotted wire. Alongside, it reads the
-invariants off the surface: the Seifert matrix, the Alexander polynomial, the signature, the genus.
+Then it tames the wire: the boundary of that surface is relaxed as a knot with Scharein's KnotPlot forces, the ones
+van Wijk and Cohen use, while the surface follows it as a rubber sheet. Then it fixes the wire and relaxes the
+surface to the minimal surface spanning it, by solving the minimal surface equation on it: the soap film on a knotted
+wire. Alongside, it reads the invariants off the surface: the Seifert matrix, the Alexander polynomial, the
+signature, the genus.
 
 It is a single-page web app in the shape of [EllipticCurve3D](../EllipticCurve3D): `web/index.html` with `js/`, `css/`
 and `data/`, three.js and KaTeX vendored, no build step; the mathematics in two dependency-free modules that also run
@@ -21,24 +23,28 @@ python3 -m http.server -d ~/Projects/SeifertSurface/web 8766      # then http://
 |---|---|
 | `web/index.html` | the page |
 | `web/js/seifert.js` | braid words, the closed braid, the Bennequin surface as a triangle mesh, the Seifert matrix, `Δ(t)`, signature |
-| `web/js/minimal.js` | discrete minimal surfaces: cotangent Laplacian, conjugate gradients, the harmonic step and mean curvature flow, Delaunay flips, tangential smoothing, diagnostics, linking numbers |
+| `web/js/minimal.js` | discrete minimal surfaces: cotangent Laplacian, conjugate gradients, the harmonic step and mean curvature flow, the harmonic extension that carries the surface with the wire, Delaunay flips, tangential smoothing, diagnostics, linking numbers |
+| `web/js/wire.js` | taming the wire: Scharein's KnotPlot relaxation of the boundary loops (springs, repulsion, damped Euler, self-intersection refused) |
 | `web/js/app.js` | viewer and UI |
 | `web/js/vendor/` | three.js r128, OrbitControls, KaTeX 0.16.11 (licenses alongside) |
 | `web/css/` | the stylesheet (EllipticCurve3D's), KaTeX's with its fonts |
 | `web/data/knots.json` | KnotInfo's braid words for the 2,961 knots through 12 crossings and LinkInfo's for the 4,188 links through 11, with the knots' genera |
 | `web/data/braid.sage` | `sage web/data/braid.sage K12n242` (or a PD code, or `DT:[...]`): a braid word for any knot, by SnapPy |
-| `web/test/test-seifert.mjs` | `node web/test/test-seifert.mjs`: 185 checks against Sage's values in `vectors.json` (made by `make_vectors.sage`), plus the mesh and the solver |
+| `web/test/test-seifert.mjs` | `node web/test/test-seifert.mjs`: 193 checks against Sage's values in `vectors.json` (made by `make_vectors.sage`), plus the mesh, the wire and the solver |
 
 The web app takes a braid word (`1 2 -1 2`, `s1 s2 s1^-1 s2`, `σ₁σ₂σ₁⁻¹σ₂`, `abAb`, `(1 2)^5`), a torus link `T(p, q)`,
 or a name from the tables (`3_1`, `12n242`, `11n_34`, `L6a4`, `L2a1{1}`, and the aliases `trefoil`, `figure-eight`,
 `hopf`, `whitehead`, `borromean`, `lehmer`). The info line gives the braid, the strands, crossings and components,
 `χ` and the genus of the surface, `Δ(t)`, `det`, `σ`, and whether the surface has the knot's genus (from KnotInfo, or
-from `deg Δ = 2g`). **Relax** runs the relaxation; the flow bar shows the round, the area, the root mean square of the
-discrete mean curvature `|H|` over the interior (the residual of the equation), and the largest displacement. The
-drawer has three tabs: **Surface** (the starting surface: disk spacing, band width and bulge, resolution, the rounding
-of the wire's corners), **Flow** (the harmonic step or mean curvature flow with a finite step, edge flips, tangential
-smoothing, the stopping rule), **Display** (two-sided coloring, or by disk and band, or by mean curvature; opacity,
-wireframe, the wire and its thickness, the starting surface as a ghost, axes, PNG, a shareable link `#word`).
+from `deg Δ = 2g`). **Tame wire** relaxes the wire (the surface following), **Relax film** relaxes the surface on the
+wire as it is; both can run at once. The flow bar shows the film's round, the area, the root mean square of the
+discrete mean curvature `|H|` over the interior (the residual of the equation), the largest displacement, and the
+wire's steps and growth. The drawer has four tabs: **Surface** (the starting surface: disk spacing, band width and
+bulge, resolution, the rounding of the wire's corners), **Wire** (weak or strong repulsion, its strength, the step,
+damping and decay, steps per tick, the stopping rule, a new cycle), **Film** (the harmonic step or mean curvature
+flow with a finite step, edge flips, tangential smoothing, the stopping rule), **Display** (two-sided coloring, or by
+disk and band, or by mean curvature; opacity, wireframe, the wire and its thickness, the starting surface as a ghost,
+axes, PNG, a shareable link `#word`).
 
 Conventions are Sage's: `σᵢ` is the positive crossing, so the closure of `σ₁³` is the right-handed trefoil, signature
 `−2`. The Seifert matrix is computed by the algorithm of Collins ([Col2013]) as Sage's `Link.seifert_matrix` does,
@@ -74,8 +80,30 @@ triangles induce, are the closed braid with all strands going the same way round
 linking number of the two boundary loops of `σ₁²`: `+1`.
 
 The boundary polygon then has corners where a rim arc turns up a band edge. It is rounded (binomial smoothing at a
-radius `0.1 R`, then resampled at equal arclength, so the corners do not bunch the points), and from then on it is
-the wire: it never moves again.
+radius `0.1 R`, then resampled at equal arclength, so the corners do not bunch the points). This is the wire; the
+film can be computed on it as it is, but it is the boundary of a scaffold, not a shape anyone would bend a wire into.
+
+## Taming the wire
+
+What makes van Wijk and Cohen's 2006 pictures look like knots rather than scaffolds is Scharein's relaxation from
+KnotPlot, which they adopt in §5.3, and `wire.js` applies it to the boundary loops of the mesh: every point of the
+wire is a unit mass, attracted by its two neighbours along the loop with `F_a(r) = H r^{1+β}` and repelled by every
+other point of the wire with `F_r(r) = K r^{−(2+α)}`, distances in units of the initial spacing `r_a` (`β = 1`,
+`α = 0` by default, inverse-square repulsion; `α = 4` is KnotPlot's strong, short-range repulsion). Damped explicit
+Euler, `v ← (1 − γ) v + F dt`, `x ← x + v dt`, the displacement clamped to `d_max = 0.25 r_a`; and a move is refused
+when it would bring the point within `d_close = 0.5 r_a` of a segment of the wire not adjacent to it, which with
+`d_close > d_max` keeps the knot from ever passing through itself, so the knot type is preserved (the components of a
+link repel each other by the same forces). The step decays, `dt ← (1 − μ) dt`, so a cycle settles; a new cycle starts
+from the full step. The wire grows while it relaxes, to about 1.5 times its length, the scale at which the springs
+and the repulsion balance; nothing depends on that scale. The energy falls monotonically and the corners go: on the
+trefoil the total turning of the wire drops from 5.6 turns to 2.2 in a few thousand steps of 2 ms each, and the
+stacked rims open into a round three-dimensional trefoil.
+
+The surface is not given springs of its own, as theirs is. After every few steps of the wire the surface is carried
+along as a rubber sheet: the wire's displacement is extended harmonically into the interior (the same cotangent
+Laplace solve as the film, with the displacement as boundary data, `Minimal.extend`), which moves every vertex
+smoothly and keeps the mesh sound. A translation, rotation or dilation of the wire is transported exactly. The film
+is then computed on the tamed wire. The rubber sheet, like theirs, is not checked for self-intersection; the wire is.
 
 The Seifert form on `H₁` of this surface has a basis of loops that go up one band, along the upper disk, down the
 next band of the same column and back along the lower disk; the linking numbers between them and their push-offs are
@@ -175,8 +203,9 @@ minimal-genus surfaces, are their listed future work; the genus question was tak
 
 So the two objections to the soap film are exactly what this project supplies: the 3D embedding and the starting mesh
 are the Bennequin surface itself, and the minimisation is one sparse linear solve per round, fast enough for a
-browser. Their pictures remain the model for the rendering, and their letter convention is the reverse of the one
-here (`a` is `σ₁`, `A` its inverse), so a SeifertView word is typed with its case swapped.
+browser; and their relaxation of the knot is kept, as the step that makes the wire worth spanning. Their pictures
+remain the model for the rendering, and their letter convention is the reverse of the one here (`a` is `σ₁`, `A` its
+inverse), so a SeifertView word is typed with its case swapped.
 
 Soap films on knotted wires have been computed before, with Brakke's Surface Evolver: Brakke's own page *Soap films
 on knots* has Evolver files for the trefoil and the figure-eight, the orientable films among them being numerically
@@ -219,7 +248,9 @@ no degenerate triangles; the linking numbers of the Hopf link and `T(2,4)` from 
 mirror, `2`); the solver on a bumped disk (flattens to the polygon's area, `H → 0`, boundary fixed), on the catenoid
 (area within 0.5% of the exact catenoid, waist radius, monotone area under both the harmonic step and mean curvature
 flow), and on the trefoil's surface (area decreases, `χ` and orientation survive the flips, the wire does not move,
-the residual falls).
+the residual falls); the wire relaxation on a circle (stays round and evenly spaced, grows) and on the trefoil (the
+energy falls monotonically, the total turning halves, no strand within `d_close` of another, the surface follows and
+stays sound, the film on the tamed wire relaxes).
 
 ## Planned
 

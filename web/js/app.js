@@ -1,4 +1,4 @@
-/* app.js -- viewer and UI for the Seifert Surface web app.  Globals: THREE, katex, Seifert, Minimal. */
+/* app.js -- viewer and UI for the Seifert Surface web app.  Globals: THREE, katex, Seifert, Minimal, Wire. */
 (function () {
 'use strict';
 const $ = id => document.getElementById(id);
@@ -6,8 +6,10 @@ const isMobile = matchMedia('(max-width: 640px)').matches || navigator.maxTouchP
 
 const state = { spacing: 0.45, bandwidth: 1.2, bulge: 0.7, angular: isMobile ? 96 : 144, round: 0.1,
                 dt: 3.1, flips: true, tangential: 0.3, perframe: 2, stop: -7,          // dt is log10 of the step; 3.1 is ∞
+                alpha: 0, kh: 0, dt0: 0.2, gamma: 0.15, decay: 0.0003, wiresteps: 10, wirestop: -5,   // the wire: kh is log10 of K/H
                 coloring: 'sides', opacity: 1, wireframe: false, wire: true, thick: 0.02, ghost: false, axes: false };
 let mesh = null, record = null, lastText = '', iteration = 0, running = false, lastStats = null, sizeRadius = 2, areas = [];
+let wire = null, wireRunning = false, wireStats = null;                                   // the wire's relaxation state (Wire.init)
 
 // ------------------------------------------------------------------ scene
 const view = $('view');
@@ -38,9 +40,10 @@ function requestRender() { dirty = true; }
 let ticking = false;
 function tick() {
   ticking = false;
-  if (!running || !mesh) return;
-  for (let k = 0; k < state.perframe && running; k++) relaxOnce();
-  if (running) { ticking = true; setTimeout(tick, 0); }
+  if (!mesh || (!running && !wireRunning)) return;
+  if (wireRunning) tameOnce();
+  if (running) for (let k = 0; k < state.perframe && running; k++) relaxOnce();
+  if (running || wireRunning) { ticking = true; setTimeout(tick, 0); }
 }
 window.addEventListener('resize', () => { renderer.setSize(view.clientWidth, view.clientHeight); camera.aspect = view.clientWidth / view.clientHeight; camera.updateProjectionMatrix(); requestRender(); });
 function resetView() {
@@ -157,17 +160,36 @@ function relaxOnce() {
 }
 function showStats() {
   $('v-iter').textContent = String(iteration);
-  if (!mesh) { for (const id of ['v-area', 'v-h', 'v-moved']) $(id).textContent = '–'; return; }
+  if (!mesh) { for (const id of ['v-area', 'v-h', 'v-moved', 'v-wire']) $(id).textContent = '–'; return; }
   const H = Minimal.meanCurvature(mesh);
   $('v-area').textContent = Minimal.area(mesh).toFixed(4);
   $('v-h').textContent = (H.rms * mesh.params.R).toPrecision(3);
   $('v-moved').textContent = lastStats ? lastStats.moved.toExponential(1) : '–';
+  $('v-wire').textContent = wire && wire.steps ? `${wire.steps} steps, ×${(Wire.length(wire) / wire.L0).toFixed(2)}` : '–';
 }
-function setRunning(on) { running = !!on && !!mesh; $('run').textContent = running ? '❚❚ Pause' : '▶ Relax'; if (running && !ticking) { ticking = true; setTimeout(tick, 0); } }
+function setRunning(on) { running = !!on && !!mesh; $('run').textContent = running ? '❚❚ Pause film' : '▶ Relax film'; if (running && !ticking) { ticking = true; setTimeout(tick, 0); } }
+// ------------------------------------------------------------------ taming the wire
+function wireOptions() { return { alpha: state.alpha, K: Math.pow(10, state.kh), H: 1, gamma: state.gamma, dt0: state.dt0, decay: state.decay }; }
+function initWire() { wire = mesh ? Wire.init(mesh, wireOptions()) : null; wireStats = null; }
+function tameOnce() {                                            // `wiresteps` steps of the wire, then the surface follows
+  if (!mesh || !wire) return;
+  Object.assign(wire.o, wireOptions());
+  let s = null;
+  for (let k = 0; k < state.wiresteps; k++) s = Wire.step(wire);
+  Wire.apply(wire, mesh, Minimal);
+  wireStats = s; iteration = 0; areas = [];                       // the film starts afresh on the moved wire
+  updateSurfacePositions(); buildWire(); showStats();
+  if (s.moved < Math.pow(10, state.wirestop) * mesh.params.R) setWireRunning(false);
+}
+function setWireRunning(on) { wireRunning = !!on && !!mesh; $('tame').textContent = wireRunning ? '❚❚ Pause wire' : '▶ Tame wire'; if (wireRunning && !ticking) { ticking = true; setTimeout(tick, 0); } }
 function resetSurface() {
   if (!mesh) return;
-  setRunning(false); mesh.pos.set(mesh.initial); mesh.tri.set(mesh.initialTri); Minimal.prepare(mesh); iteration = 0; lastStats = null; areas = [];
-  updateSurfacePositions(); showStats();
+  setRunning(false); setWireRunning(false); mesh.pos.set(mesh.initial); mesh.tri.set(mesh.initialTri); Minimal.prepare(mesh); iteration = 0; lastStats = null; areas = [];
+  initWire(); updateSurfacePositions(); buildWire(); showStats();
+}
+function wireRadius() {                                          // the extent of the wire, for the view
+  let r = 0; if (mesh) for (const loop of mesh.loops) for (const v of loop) r = Math.max(r, Math.hypot(mesh.pos[3 * v], mesh.pos[3 * v + 1], mesh.pos[3 * v + 2]));
+  return r;
 }
 
 // ------------------------------------------------------------------ text
@@ -194,7 +216,7 @@ function nextFrame() { return new Promise(r => { let done = false; const go = ()
 async function build(text, opts = {}) {
   text = (text || '').trim(); if (!text) return;
   lastText = text; $('input').value = text; updateHash(text);
-  $('busy').hidden = false; setRemarks([]); setRunning(false); await nextFrame();
+  $('busy').hidden = false; setRemarks([]); setRunning(false); setWireRunning(false); await nextFrame();
   try {
     const parsed = Seifert.parseBraid(text);
     if (parsed.error) throw new Error(parsed.error);
@@ -211,7 +233,7 @@ async function build(text, opts = {}) {
     if (bd.n * bd.c > 6000) throw new Error('too many strands and crossings to draw');
     mesh = Seifert.buildSurface(word, { spacing: state.spacing, bandWidth: state.bandwidth, bulge: state.bulge, angular: state.angular, round: state.round });
     Minimal.prepare(mesh); mesh.initialTri = mesh.tri.slice(); mesh.meanEdge = Minimal.meanEdgeLength(mesh);
-    iteration = 0; lastStats = null; areas = [];
+    iteration = 0; lastStats = null; areas = []; initWire();
     sizeRadius = Math.max(mesh.params.R + mesh.params.b + mesh.params.W, 0.6 * bd.n * state.spacing + 0.5);
     buildSurfaceObjects(); rebuildDecorations(); if (!opts.keepView) resetView();
     // the info line
@@ -240,7 +262,7 @@ async function build(text, opts = {}) {
     showStats();
     if (opts.autorun) setRunning(true);
   } catch (e) {
-    mesh = null; record = null; disposeObject(frontMesh); disposeObject(backMesh); disposeObject(ghostMesh); disposeObject(wireGroup); frontMesh = backMesh = ghostMesh = wireGroup = null;
+    mesh = null; record = null; wire = null; disposeObject(frontMesh); disposeObject(backMesh); disposeObject(ghostMesh); disposeObject(wireGroup); frontMesh = backMesh = ghostMesh = wireGroup = null;
     setInfo(`<span class="err">${mixed(e.message)}</span>`, ''); showStats();
   } finally { $('busy').hidden = true; requestRender(); }
 }
@@ -260,6 +282,9 @@ $('examples').addEventListener('change', e => { if (e.target.value) build(e.targ
 $('build').addEventListener('click', () => build($('input').value));
 $('input').addEventListener('keydown', e => { if (e.key === 'Enter') build($('input').value); });
 $('run').addEventListener('click', () => setRunning(!running));
+$('tame').addEventListener('click', () => setWireRunning(!wireRunning));
+$('wire-restart').addEventListener('click', () => { if (wire) { Wire.restart(wire); setWireRunning(true); } });
+$('alpha').value = state.alpha; $('alpha').addEventListener('change', e => { state.alpha = Number(e.target.value); });
 $('step-once').addEventListener('click', () => { setRunning(false); relaxOnce(); });
 $('reset-surface').addEventListener('click', resetSurface);
 const drawer = $('drawer'), tabs = [...drawer.querySelectorAll('.tab')];
@@ -286,6 +311,12 @@ bindRange('bulge', 'bulge', v => v.toFixed(1), rebuild);
 bindRange('angular', 'angular', v => v, rebuild);
 bindRange('round', 'round', v => v.toFixed(2), rebuild);
 $('rebuild').addEventListener('click', () => { if (lastText !== null) build(lastText, { keepView: true }); });
+bindRange('kh', 'kh', v => Math.pow(10, v).toPrecision(2), () => {});
+bindRange('dt0', 'dt0', v => v.toFixed(2), () => {});
+bindRange('gamma', 'gamma', v => v.toFixed(2), () => {});
+bindRange('decay', 'decay', v => v.toFixed(4), () => {});
+bindRange('wiresteps', 'wiresteps', v => v, () => {});
+bindRange('wirestop', 'wirestop', v => '10^' + v, () => {});
 bindRange('dt', 'dt', v => v >= 3.05 ? '∞ (harmonic)' : Math.pow(10, v).toPrecision(2), () => {});
 bindCheck('flips', 'flips', () => {});
 bindRange('tangential', 'tangential', v => v.toFixed(2), () => {});
@@ -298,11 +329,11 @@ bindCheck('wire', 'wire', () => { if (wireGroup) wireGroup.visible = state.wire;
 bindRange('thick', 'thick', v => v.toFixed(3), kind => { if (kind === 'change') buildWire(); });
 bindCheck('ghost', 'ghost', () => { if (ghostMesh) ghostMesh.visible = state.ghost; });
 bindCheck('axes', 'axes', () => { if (axesGroup) axesGroup.visible = state.axes; });
-$('reset-view').addEventListener('click', resetView);
+$('reset-view').addEventListener('click', () => { if (mesh) sizeRadius = Math.max(sizeRadius * 0.5, wireRadius() * 1.05); resetView(); });
 $('snapshot').addEventListener('click', () => { renderer.render(scene, camera); const a = document.createElement('a'); a.href = renderer.domElement.toDataURL('image/png'); a.download = 'seifert-surface.png'; document.body.appendChild(a); a.click(); a.remove(); });
 $('share').addEventListener('click', async () => { const url = shareLink(); try { await navigator.clipboard.writeText(url); $('share').textContent = 'Copied'; setTimeout(() => $('share').textContent = 'Copy link', 1200); } catch (e) { prompt('Link:', url); } });
 setTimeout(() => { $('hint').hidden = true; }, 9000);
-window.SEIFERT_DEBUG = { state, get mesh() { return mesh; }, build, relaxOnce, setRunning, render: () => renderer.render(scene, camera), canvas: renderer.domElement, Seifert, Minimal };
+window.SEIFERT_DEBUG = { state, get mesh() { return mesh; }, get wire() { return wire; }, build, relaxOnce, tameOnce, setRunning, setWireRunning, render: () => renderer.render(scene, camera), canvas: renderer.domElement, Seifert, Minimal, Wire };
 const initial = decodeURIComponent((location.hash || '').slice(1));
 build(initial || '3_1');
 })();

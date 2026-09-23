@@ -91,38 +91,40 @@ function meanCurvature(mesh) {
 Minimal.meanCurvature = meanCurvature;
 
 // ------------------------------------------------------------------ the elliptic solve
-// One step: solve (M/dt + L) x = M x_old / dt + (boundary terms) for the interior vertices, with dt = Infinity the
-// harmonic step L x = 0.  Returns { iterations, residual, moved } (the largest vertex displacement).
-function step(mesh, opts = {}) {
+// Solve (M/dt + L) x = M x0/dt + (boundary terms) for the interior vertices, x prescribed on the fixed vertices.
+// `target` (3V) holds the prescribed values on the fixed vertices and, on the interior, x0 and the warm start.
+// dt = Infinity is the harmonic problem L x = 0.  Returns { x (3V: the solution on the interior, target on the
+// boundary), iterations, residual }.
+function solve(mesh, target, opts = {}) {
   const dt = opts.dt === undefined ? Infinity : opts.dt, invdt = dt === Infinity ? 0 : 1 / dt;
-  const T = mesh.topo, p = mesh.pos, V = T.V, { w, mass } = weights(mesh);
+  const T = mesh.topo, V = T.V, { w, mass } = weights(mesh), out = Float64Array.from(target);
   const idx = new Int32Array(V).fill(-1); let n = 0;
   for (let v = 0; v < V; v++) if (!mesh.fixed[v]) idx[v] = n++;
-  if (!n) return { iterations: 0, residual: 0, moved: 0 };
+  if (!n) return { x: out, iterations: 0, residual: 0 };
   const diag = new Float64Array(n), verts = new Int32Array(n);
   for (let v = 0; v < V; v++) if (idx[v] >= 0) {
     verts[idx[v]] = v; let s = mass[v] * invdt;
     for (let k = T.start[v]; k < T.start[v + 1]; k++) s += w[T.nbrEdge[k]];
     diag[idx[v]] = s;
   }
-  const matvec = (x, out) => {
+  const matvec = (x, res) => {
     for (let r = 0; r < n; r++) {
       const v = verts[r]; let s = diag[r] * x[r];
       for (let k = T.start[v]; k < T.start[v + 1]; k++) { const j = T.nbr[k]; if (idx[j] >= 0) s -= w[T.nbrEdge[k]] * x[idx[j]]; }
-      out[r] = s;
+      res[r] = s;
     }
   };
   const tol = opts.tol || 1e-9, maxIter = opts.maxIter || 2000;
-  let iterations = 0, residual = 0, moved = 0;
+  let iterations = 0, residual = 0;
   const x = new Float64Array(n), b = new Float64Array(n), r = new Float64Array(n), z = new Float64Array(n), q = new Float64Array(n), d = new Float64Array(n);
   const pre = new Float64Array(n); for (let i = 0; i < n; i++) pre[i] = 1 / Math.max(diag[i], 1e-12);
   for (let c = 0; c < 3; c++) {
     for (let i = 0; i < n; i++) {
-      const v = verts[i]; x[i] = p[3 * v + c]; let s = mass[v] * invdt * p[3 * v + c];
-      for (let k = T.start[v]; k < T.start[v + 1]; k++) { const j = T.nbr[k]; if (idx[j] < 0) s += w[T.nbrEdge[k]] * p[3 * j + c]; }
+      const v = verts[i]; x[i] = target[3 * v + c]; let s = mass[v] * invdt * target[3 * v + c];
+      for (let k = T.start[v]; k < T.start[v + 1]; k++) { const j = T.nbr[k]; if (idx[j] < 0) s += w[T.nbrEdge[k]] * target[3 * j + c]; }
       b[i] = s;
     }
-    // preconditioned conjugate gradients from the current positions
+    // preconditioned conjugate gradients from the warm start
     matvec(x, q); let rz = 0, bnorm = 0;
     for (let i = 0; i < n; i++) { r[i] = b[i] - q[i]; z[i] = pre[i] * r[i]; d[i] = z[i]; rz += r[i] * z[i]; bnorm += b[i] * b[i]; }
     bnorm = Math.sqrt(bnorm) || 1; let it = 0, rn = 0;
@@ -137,11 +139,29 @@ function step(mesh, opts = {}) {
       for (let i = 0; i < n; i++) d[i] = z[i] + beta * d[i];
     }
     iterations = Math.max(iterations, it); residual = Math.max(residual, rn / bnorm);
-    for (let i = 0; i < n; i++) { const v = verts[i]; moved = Math.max(moved, Math.abs(x[i] - p[3 * v + c])); p[3 * v + c] = x[i]; }
+    for (let i = 0; i < n; i++) out[3 * verts[i] + c] = x[i];
   }
-  return { iterations, residual, moved };
+  return { x: out, iterations, residual };
+}
+Minimal.solve = solve;
+// One step of the surface with the wire fixed: the harmonic step (dt = Infinity) or implicit mean curvature flow.
+// Returns { iterations, residual, moved } (the largest vertex displacement).
+function step(mesh, opts = {}) {
+  const r = solve(mesh, mesh.pos, opts), p = mesh.pos; let moved = 0;
+  for (let i = 0; i < p.length; i++) { moved = Math.max(moved, Math.abs(r.x[i] - p[i])); p[i] = r.x[i]; }
+  return { iterations: r.iterations, residual: r.residual, moved };
 }
 Minimal.step = step;
+// Carry the surface along with a displacement of the wire, as a rubber sheet: the harmonic extension of the
+// boundary displacement `disp` (3V, read on the fixed vertices) is added to every vertex.
+function extend(mesh, disp, opts = {}) {
+  const target = new Float64Array(disp.length);
+  for (let v = 0; v < mesh.fixed.length; v++) if (mesh.fixed[v]) for (let c = 0; c < 3; c++) target[3 * v + c] = disp[3 * v + c];
+  const r = solve(mesh, target, Object.assign({ dt: Infinity }, opts)), p = mesh.pos; let moved = 0;
+  for (let i = 0; i < p.length; i++) { moved = Math.max(moved, Math.abs(r.x[i])); p[i] += r.x[i]; }
+  return { iterations: r.iterations, residual: r.residual, moved };
+}
+Minimal.extend = extend;
 
 // ------------------------------------------------------------------ mesh maintenance
 // Edge flips towards the intrinsic Delaunay triangulation: an interior edge whose two opposite angles sum to more
