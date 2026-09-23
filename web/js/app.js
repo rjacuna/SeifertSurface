@@ -7,6 +7,7 @@ const isMobile = matchMedia('(max-width: 640px)').matches || navigator.maxTouchP
 const state = { spacing: 0.45, bandwidth: 1.2, bulge: 0.7, angular: isMobile ? 96 : 144, round: 0.1,
                 dt: 3.1, flips: true, tangential: 0.3, perframe: 2, stop: -7,          // dt is log10 of the step; 3.1 is ∞
                 alpha: 0, kh: 0, dt0: 0.2, gamma: 0.15, decay: 0.0003, wiresteps: 10, wirestop: -5,   // the wire: kh is log10 of K/H
+                drag: false, brush: 0.08,                                                        // dragging the wire by hand
                 coloring: 'sides', opacity: 1, wireframe: false, wire: true, thick: 0.02, ghost: false, axes: false };
 let mesh = null, record = null, lastText = '', iteration = 0, running = false, lastStats = null, sizeRadius = 2, areas = [];
 let wire = null, wireRunning = false, wireStats = null;                                   // the wire's relaxation state (Wire.init)
@@ -41,8 +42,10 @@ let ticking = false;
 function tick() {
   ticking = false;
   if (!mesh || (!running && !wireRunning)) return;
-  if (wireRunning) tameOnce();
-  if (running) for (let k = 0; k < state.perframe && running; k++) relaxOnce();
+  try {
+    if (wireRunning) tameOnce();
+    if (running) for (let k = 0; k < state.perframe && running; k++) relaxOnce();
+  } catch (e) { setRunning(false); setWireRunning(false); setInfo(`<span class="err">${esc(e.message)}</span> — Reset the surface`, ''); console.error(e); return; }
   if (running || wireRunning) { ticking = true; setTimeout(tick, 0); }
 }
 window.addEventListener('resize', () => { renderer.setSize(view.clientWidth, view.clientHeight); camera.aspect = view.clientWidth / view.clientHeight; camera.updateProjectionMatrix(); requestRender(); });
@@ -177,11 +180,64 @@ function tameOnce() {                                            // `wiresteps` 
   let s = null;
   for (let k = 0; k < state.wiresteps; k++) s = Wire.step(wire);
   Wire.apply(wire, mesh, Minimal);
-  wireStats = s; iteration = 0; areas = [];                       // the film starts afresh on the moved wire
+  // one round of the film on the moved wire, so the surface shown is the soap film as it is and the mesh stays sound
+  Minimal.relax(mesh, { dt: dtValue(), flips: state.flips, tangential: state.tangential > 0 ? state.tangential : false, tol: 1e-8 });
+  wireStats = s; iteration = 0; areas = [];                       // the film's own count starts afresh on the moved wire
+  const r = wireRadius();                                          // the wire grows: keep it in view, from the same direction
+  if (r > sizeRadius) { camera.position.multiplyScalar(r / sizeRadius); sizeRadius = r; camera.far = 100 * r; camera.updateProjectionMatrix(); }
   updateSurfacePositions(); buildWire(); showStats();
   if (s.moved < Math.pow(10, state.wirestop) * mesh.params.R) setWireRunning(false);
 }
 function setWireRunning(on) { wireRunning = !!on && !!mesh; $('tame').textContent = wireRunning ? '❚❚ Pause wire' : '▶ Tame wire'; if (wireRunning && !ticking) { ticking = true; setTimeout(tick, 0); } }
+// ------------------------------------------------------------------ deforming the wire by hand
+// With "Drag wire" on, dragging on the wire moves the point under the pointer in the plane facing the camera, the
+// points near it along the loop with it (a Gaussian falloff of width `brush` × the loop's length), and the surface
+// follows: the harmonic extension and one round of the film, as in taming.  No self-intersection check here.
+const raycaster = new THREE.Raycaster();
+let drag = null;                                                 // { k (wire index), loop, plane, start (Vector3), P0 (the wire before the drag) }
+function pointerRay(ev) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  raycaster.setFromCamera(new THREE.Vector2(((ev.clientX - rect.left) / rect.width) * 2 - 1, -((ev.clientY - rect.top) / rect.height) * 2 + 1), camera);
+  return raycaster;
+}
+function wireDown(ev) {
+  if (!state.drag || !mesh || !wire || !wireGroup) return;
+  const hits = pointerRay(ev).intersectObjects(wireGroup.children, false);
+  if (!hits.length) return;
+  const h = hits[0].point; let best = Infinity, k = -1;
+  for (let i = 0; i < wire.N; i++) { const d = Math.hypot(wire.P[3 * i] - h.x, wire.P[3 * i + 1] - h.y, wire.P[3 * i + 2] - h.z); if (d < best) { best = d; k = i; } }
+  const normal = new THREE.Vector3(); camera.getWorldDirection(normal);
+  const anchor = new THREE.Vector3(wire.P[3 * k], wire.P[3 * k + 1], wire.P[3 * k + 2]);
+  drag = { k, plane: new THREE.Plane().setFromNormalAndCoplanarPoint(normal, anchor), anchor, P0: wire.P.slice(), pending: null };
+  controls.enabled = false; ev.preventDefault();
+  renderer.domElement.setPointerCapture(ev.pointerId);
+}
+function wireMove(ev) {
+  if (!drag) return;
+  const target = new THREE.Vector3();
+  if (!pointerRay(ev).ray.intersectPlane(drag.plane, target)) return;
+  drag.pending = target; if (!drag.queued) { drag.queued = true; requestAnimationFrame(applyDrag); }
+}
+function applyDrag() {
+  if (!drag || !drag.pending) { if (drag) drag.queued = false; return; }
+  drag.queued = false;
+  const d = drag.pending.clone().sub(drag.anchor), k = drag.k, loop = wire.loopOf[k];
+  // arclength along the loop from k, in both directions, on the wire as it was when the drag started
+  const P0 = drag.P0, N = wire.N; let len = 0; const idx = []; for (let i = 0; i < N; i++) if (wire.loopOf[i] === loop) idx.push(i);
+  for (const i of idx) { const n = wire.next[i]; len += Math.hypot(P0[3 * n] - P0[3 * i], P0[3 * n + 1] - P0[3 * i + 1], P0[3 * n + 2] - P0[3 * i + 2]); }
+  const sigma = Math.max(1e-6, state.brush * len), dist = new Map([[k, 0]]);
+  let i = k, s = 0; while (true) { const n = wire.next[i]; if (n === k) break; s += Math.hypot(P0[3 * n] - P0[3 * i], P0[3 * n + 1] - P0[3 * i + 1], P0[3 * n + 2] - P0[3 * i + 2]); dist.set(n, Math.min(dist.get(n) ?? Infinity, Math.min(s, len - s))); i = n; }
+  for (const [j, sj] of dist) { const w = Math.exp(-(sj * sj) / (2 * sigma * sigma)); for (let c = 0; c < 3; c++) wire.P[3 * j + c] = P0[3 * j + c] + w * d.getComponent(c); }
+  Wire.apply(wire, mesh, Minimal);
+  Minimal.relax(mesh, { dt: dtValue(), flips: state.flips, tangential: state.tangential > 0 ? state.tangential : false, tol: 1e-7 });
+  iteration = 0; areas = []; updateSurfacePositions(); buildWire(); showStats();
+}
+function wireUp(ev) { if (!drag) return; drag = null; controls.enabled = true; try { renderer.domElement.releasePointerCapture(ev.pointerId); } catch (e) {} }
+renderer.domElement.addEventListener('pointerdown', wireDown);
+renderer.domElement.addEventListener('pointermove', wireMove);
+renderer.domElement.addEventListener('pointerup', wireUp);
+renderer.domElement.addEventListener('pointercancel', wireUp);
+function setDrag(on) { state.drag = !!on; $('drag').classList.toggle('active', state.drag); $('drag').setAttribute('aria-pressed', String(state.drag)); renderer.domElement.style.cursor = state.drag ? 'grab' : ''; }
 function resetSurface() {
   if (!mesh) return;
   setRunning(false); setWireRunning(false); mesh.pos.set(mesh.initial); mesh.tri.set(mesh.initialTri); Minimal.prepare(mesh); iteration = 0; lastStats = null; areas = [];
@@ -283,6 +339,8 @@ $('build').addEventListener('click', () => build($('input').value));
 $('input').addEventListener('keydown', e => { if (e.key === 'Enter') build($('input').value); });
 $('run').addEventListener('click', () => setRunning(!running));
 $('tame').addEventListener('click', () => setWireRunning(!wireRunning));
+$('drag').addEventListener('click', () => setDrag(!state.drag));
+bindRange('brush', 'brush', v => v.toFixed(2), () => {});
 $('wire-restart').addEventListener('click', () => { if (wire) { Wire.restart(wire); setWireRunning(true); } });
 $('alpha').value = state.alpha; $('alpha').addEventListener('change', e => { state.alpha = Number(e.target.value); });
 $('step-once').addEventListener('click', () => { setRunning(false); relaxOnce(); });

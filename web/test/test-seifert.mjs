@@ -190,6 +190,20 @@ function turning(ws) {                                       // total turning an
   check('wire: the film on the tamed wire relaxes', H.rms < 0.5 && Minimal.degenerateTriangles(m, 1e-9) === 0, `rms ${H.rms}, max ${H.max}, area ${A}`);
 }
 
+{ // stress: taming with a film round after every few wire steps keeps the mesh a manifold (the flips must never make an edge twice)
+  let ok = true, detail = '';
+  for (const word of [[1, 1, 1], [1, 2, 2, 1, 1, 2, 2, 2, 2, 2, 2, 2], [1, -2, 1, -2]]) {
+    const m = Seifert.buildSurface(word, { angular: 96 }); Minimal.prepare(m);
+    const ws = Wire.init(m, { dt0: 0.2, gamma: 0.15, decay: 0.0003 });
+    try {
+      for (let t = 0; t < 60; t++) { for (let k = 0; k < 10; k++) Wire.step(ws); Wire.apply(ws, m, Minimal); Minimal.relax(m, { dt: Infinity, flips: true, tangential: 0.3, tol: 1e-7 }); }
+      Minimal.prepare(m);
+      if (!Minimal.orientable(m.tri, m.pos.length / 3) || Minimal.eulerCharacteristic(m) !== m.braid.chi) { ok = false; detail += ` ${word}: χ ${Minimal.eulerCharacteristic(m)}`; }
+    } catch (e) { ok = false; detail += ` ${word}: ${e.message}`; }
+  }
+  check('stress: 600 wire steps with film rounds keep the meshes manifold and oriented', ok, detail);
+}
+
 console.log(`${pass} passed, ${fail} failed`);
 for (const f of failures) console.log('  FAIL ' + f);
 process.exit(fail ? 1 : 0);

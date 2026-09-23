@@ -102,8 +102,18 @@ stacked rims open into a round three-dimensional trefoil.
 The surface is not given springs of its own, as theirs is. After every few steps of the wire the surface is carried
 along as a rubber sheet: the wire's displacement is extended harmonically into the interior (the same cotangent
 Laplace solve as the film, with the displacement as boundary data, `Minimal.extend`), which moves every vertex
-smoothly and keeps the mesh sound. A translation, rotation or dilation of the wire is transported exactly. The film
-is then computed on the tamed wire. The rubber sheet, like theirs, is not checked for self-intersection; the wire is.
+smoothly; a translation, rotation or dilation of the wire is transported exactly. Then one round of the film is run
+on the moved wire, so what is shown while the wire relaxes is the soap film on the wire as it is, and the flips and
+the tangential smoothing keep the mesh sound as the wire stretches. The surface, like theirs, is not checked for
+self-intersection; the wire is.
+
+The same machinery lets one deform the wire by hand: with **Drag wire** on, a point of the wire dragged with the
+pointer moves in the plane facing the camera, its neighbours along the loop with it (a Gaussian falloff of a chosen
+width), and the surface follows as the film on the moved wire. Nothing stops a strand from being pushed through
+another here. Whether one tames first and then spans the wire, or carries the surface along as it is done here, the
+film at the end is the same: it depends only on the final wire and on the isotopy class carried along. The order
+matters for a wire that is not born from the scaffold, a parametrised or hand-drawn knot: spanning a *given* wire
+needs Seifert's algorithm on its projection, built in the wire's own geometry, which is in the plan below.
 
 The Seifert form on `H₁` of this surface has a basis of loops that go up one band, along the upper disk, down the
 next band of the same column and back along the lower disk; the linking numbers between them and their push-offs are
@@ -257,9 +267,10 @@ stays sound, the film on the tamed wire relaxes).
 * **A surface from a Seifert matrix.** Given `V` (from `Friedl's Algorithm.ipynb`, or any `V` with `det(V − Vᵀ) = ±1`),
   a disk with `2g` bands whose twists and mutual linkings realise `V`, then the same relaxation: minimal surfaces for
   Lehmer's polynomial itself, `L(t)`, and for any Alexander polynomial one likes.
-* **Wires that are not the Bennequin boundary.** A torus knot on a round torus, a Fourier knot, a wire drawn by hand,
-  with the Seifert surface built inside it (an isotopy from the Bennequin wire, or Seifert's algorithm on the
-  projection of the given wire).
+* **Wires that are not the Bennequin boundary.** A torus knot on a round torus, a Fourier knot, a wire drawn by hand:
+  Seifert's algorithm on a generic projection of the given wire (crossings from the polygon, Seifert circles as
+  chains of its arcs, disks spanning them at staggered depths, bands at the crossings), so that the surface is built
+  in the wire's own geometry and the wire comes first. Van Wijk and Cohen list the same as future work.
 * **Diagrams as input.** PD and DT codes through `braid.sage` (SnapPy's Vogel algorithm), as `SkeinA/data/braids.txt`
   already does for the census.
 * **A self-intersection check** during the flow, and isotropic remeshing (edge split and collapse) beside the flips.

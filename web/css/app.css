@@ -25,6 +25,7 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 syst
 #topbar button { flex: 0 0 auto; }
 #topbar select { flex: 0 0 auto; width: 9.5em; min-width: 0; max-width: calc(100vw - 16px); box-sizing: border-box; }
 #topbar button.primary { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; }
+#topbar button.active { background: var(--accent-2); color: #fff; border-color: var(--accent-2); }
 #topbar .seg { display: inline-flex; flex: 0 0 auto; border: 1px solid var(--panel-border); border-radius: 8px; overflow: hidden; background: var(--input-bg); }
 #topbar .seg button { border: 0; border-radius: 0; padding: 8px 10px; background: transparent; color: var(--muted); }
 #topbar .seg button + button { border-left: 1px solid var(--panel-border); }

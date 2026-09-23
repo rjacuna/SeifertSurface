@@ -16,6 +16,7 @@
   <div id="flowbar">
     <button id="tame" type="button" class="primary" aria-label="run or pause the taming of the wire" title="Relax the wire itself with Scharein's KnotPlot forces; the surface follows as a rubber sheet">▶ Tame wire</button>
     <button id="run" type="button" class="primary" aria-label="run or pause the relaxation" title="Relax the surface to the soap film on the wire">▶ Relax film</button>
+    <button id="drag" type="button" aria-pressed="false" title="Drag the wire with the pointer; the surface follows">✋ Drag wire</button>
     <button id="step-once" type="button">Step</button>
     <button id="reset-surface" type="button" title="Back to the stacked disks and bands">Reset</button>
     <span class="lbl">iteration</span><span id="v-iter" class="val">0</span>
@@ -55,6 +56,9 @@
       <label>Wire steps per tick <span class="val" id="v-wiresteps"></span><input id="wiresteps" type="range" min="1" max="50" step="1"></label>
       <label title="Stop when the largest move of a wire point in a step is below this, in disk radii">Stop when moved &lt; <span class="val" id="v-wirestop"></span><input id="wirestop" type="range" min="-7" max="-3" step="0.5"></label>
       <div class="row"><button id="wire-restart" title="Start a new cycle from the full step">New cycle</button></div>
+      <h3>By hand</h3>
+      <p class="help">With <b>Drag wire</b> on, drag a point of the wire; it moves in the plane facing you, its neighbours along the loop with it, and the surface follows. Nothing stops a strand from being pushed through another here.</p>
+      <label title="Width of the Gaussian falloff along the loop, as a fraction of the loop's length">Brush (× loop length) <span class="val" id="v-brush"></span><input id="brush" type="range" min="0.01" max="0.3" step="0.01"></label>
     </section>
     <section id="section-flow" hidden>
       <h3>The film</h3>

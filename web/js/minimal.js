@@ -179,12 +179,13 @@ function flipDelaunay(mesh, maxPasses = 10) {
     // which triangle holds each directed edge a->b (there is one, the mesh being oriented)
     const faceOf = new Map();
     for (let f = 0; f < T.F; f++) for (let e = 0; e < 3; e++) faceOf.set(tri[3 * f + e] * V + tri[3 * f + (e + 1) % 3], f);
-    const touched = new Uint8Array(T.F); let flips = 0;
+    const touched = new Uint8Array(T.F), created = new Set(); let flips = 0;   // created: new edges of this pass, so no two flips make the same one
     for (let e = 0; e < T.E; e++) {
       if (T.boundaryEdge[e]) continue;
       const a = T.ea[e], b = T.eb[e], c = T.oppA[e], d = T.oppB[e];
       if (angleAt(c, a, b) + angleAt(d, a, b) <= Math.PI + 1e-6) continue;
-      if (T.edgeMap.has(c < d ? c * V + d : d * V + c)) continue;
+      const key = c < d ? c * V + d : d * V + c;
+      if (T.edgeMap.has(key) || created.has(key)) continue;
       const f1 = faceOf.get(a * V + b), f2 = faceOf.get(b * V + a);
       if (f1 === undefined || f2 === undefined || touched[f1] || touched[f2]) continue;
       // f1 holds a->b with third vertex c1, f2 holds b->a with third vertex d1 (c1, d1 are c, d in some order)
@@ -195,7 +196,7 @@ function flipDelaunay(mesh, maxPasses = 10) {
       if (n1[0] * old[0] + n1[1] * old[1] + n1[2] * old[2] <= 0 || n2[0] * old[0] + n2[1] * old[1] + n2[2] * old[2] <= 0) continue;
       tri[3 * f1] = a; tri[3 * f1 + 1] = d1; tri[3 * f1 + 2] = c1;
       tri[3 * f2] = b; tri[3 * f2 + 1] = c1; tri[3 * f2 + 2] = d1;
-      touched[f1] = touched[f2] = 1; flips++;
+      touched[f1] = touched[f2] = 1; created.add(key); flips++;
     }
     total += flips;
     if (!flips) break;
