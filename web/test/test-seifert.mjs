@@ -6,6 +6,7 @@ const require = createRequire(import.meta.url);
 const Seifert = require('../js/seifert.js');
 const Minimal = require('../js/minimal.js');
 const Wire = require('../js/wire.js');
+const Precomputed = require('../js/precomputed.js');
 const V = JSON.parse(fs.readFileSync(new URL('./vectors.json', import.meta.url)));
 
 let pass = 0, fail = 0; const failures = [];
@@ -225,6 +226,64 @@ function turning(ws) {                                       // total turning an
     } catch (e) { ok = false; detail += ` ${word}: ${e.message}`; }
   }
   check('stress: 600 wire steps with film rounds keep the meshes manifold and oriented', ok, detail);
+}
+
+// ---- the shipped films (web/data/films, made by web/data/precompute.mjs) ----
+{
+  const dir = new URL('../data/films/', import.meta.url);
+  let manifest = null;
+  try { manifest = JSON.parse(fs.readFileSync(new URL('index.json', dir))); } catch (e) { /* none shipped */ }
+  check('films: a manifest is shipped', !!manifest, 'run: node web/data/precompute.mjs');
+  if (manifest) {
+    check('films: the manifest is of this format version', manifest.version === Precomputed.VERSION, `${manifest.version} vs ${Precomputed.VERSION}`);
+    const table = JSON.parse(fs.readFileSync(new URL('../data/knots.json', import.meta.url)));
+    const byName = new Map(table.map(r => [r.name, r]));
+    // every example of the app's menu has one, under the key of its braid word
+    const EXAMPLES = ['3_1', '4_1', '5_1', '5_2', '6_1', '6_2', '6_3', '8_19', '10_124', '12n242', '11n34',
+                      'hopf', 'whitehead', 'borromean', 'T(4,5)', 'T(2,7)', 'T(3,6)', '1 2 3 -1 2 -3 1 2', '()'];
+    const missing = [];
+    for (const input of EXAMPLES) {
+      const p = Seifert.parseBraid(input);
+      let word = p.word;
+      if (p.name) { const rec = byName.get(p.name) || table.find(r => r.name.startsWith(p.name + '_')); word = rec && rec.braid; }
+      if (!word || !manifest.films[Precomputed.key(word)]) missing.push(input);
+    }
+    check(`films: all ${EXAMPLES.length} examples are shipped`, missing.length === 0, missing.join(' '));
+    // each one decodes to the settled film of the knot it claims: the right topology, the wire fixed, H small
+    let bad = [], bytes = 0;
+    for (const [key, entry] of Object.entries(manifest.films)) {
+      const word = key === '()' ? [] : key.split(',').map(Number);
+      const buf = fs.readFileSync(new URL(entry.file, dir));
+      bytes += buf.byteLength;
+      const film = Precomputed.decode(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+      const mesh = Seifert.buildSurface(word, { spacing: manifest.params.spacing, bandWidth: manifest.params.bandWidth, bulge: manifest.params.bulge, angular: manifest.params.angular, round: manifest.params.round });
+      Minimal.prepare(mesh);
+      const bd = mesh.braid;
+      try {
+        Precomputed.install(mesh, film, Seifert, Minimal);
+        const H = Minimal.meanCurvature(mesh), chi = Minimal.eulerCharacteristic(mesh);
+        const why = [];
+        if (chi !== bd.chi) why.push(`χ ${chi} not ${bd.chi}`);
+        if (mesh.loops.length !== bd.mu) why.push(`${mesh.loops.length} loops not ${bd.mu}`);
+        if (!Minimal.orientable(mesh.tri, film.V)) why.push('not oriented');
+        if (Minimal.degenerateTriangles(mesh, 1e-9)) why.push(`${Minimal.degenerateTriangles(mesh, 1e-9)} degenerate`);
+        if (!entry.pinched && !(H.rms < 0.5)) why.push(`rms |H| ${H.rms.toFixed(3)}`);
+        if (Math.abs(Minimal.area(mesh) - entry.area) > 1e-3 * entry.area) why.push(`area ${Minimal.area(mesh).toFixed(3)} not ${entry.area}`);
+        if (!(film.length / film.L0 > 1.0)) why.push(`the wire did not grow (×${(film.length / film.L0).toFixed(2)})`);
+        if (why.length) bad.push(`${entry.file}: ${why.join(', ')}`);
+      } catch (e) { bad.push(`${entry.file}: ${e.message}`); }
+    }
+    check(`films: all ${Object.keys(manifest.films).length} decode to settled films of the right topology (${(bytes / 1024 / 1024).toFixed(2)} MB)`, bad.length === 0, bad.join(' | '));
+    // a film whose parameters the app has changed must not be used: the manifest records what made it
+    check('films: the manifest records the parameters they were made with', ['spacing', 'bandWidth', 'bulge', 'round', 'alpha', 'K', 'dclose', 'maxsteps'].every(k => manifest.params[k] !== undefined));
+  }
+  // the format itself
+  const s = { pos: Float64Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0]), tri: Uint32Array.from([0, 1, 2]), kind: Int16Array.from([0, 1, 2]), steps: 7, pinched: true, capped: false, L0: 1.5, length: 2.5, edge0: 0.25, area: 0.5 };
+  const back = Precomputed.decode(Precomputed.encode(s));
+  check('films: a film survives encoding and decoding', back.V === 3 && back.F === 1 && back.steps === 7 && back.pinched && !back.capped && back.L0 === 1.5 && back.length === 2.5 && back.edge0 === 0.25 && back.area === 0.5
+        && [...back.pos].join() === [...s.pos].join() && [...back.tri].join() === [...s.tri].join() && [...back.kind].join() === [...s.kind].join());
+  let threw = false; try { Precomputed.decode(new ArrayBuffer(8)); } catch (e) { threw = true; }
+  check('films: a truncated file is refused', threw);
 }
 
 console.log(`${pass} passed, ${fail} failed`);

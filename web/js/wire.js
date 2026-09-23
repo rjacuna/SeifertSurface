@@ -179,6 +179,17 @@ function apply(ws, mesh, Minimal) {
 }
 Wire.apply = apply;
 Wire.restart = ws => { ws.dt = ws.o.dt0; ws.V.fill(0); ws.energies = []; };
+// A copy of everything taming changes, so that a tick which pinches the film can be undone: the wire is then as
+// far open as it can be while the surface still follows it, which is where taming should stop.
+Wire.snapshot = (ws, mesh) => ({ P: ws.P.slice(), V: ws.V.slice(), dt: ws.dt, steps: ws.steps, energies: ws.energies.slice(), F: ws.F.map(f => f.slice()),
+                                 fLoops: ws.fLoops.map(f => ({ vert: f.vert.slice(), n: f.n })),
+                                 pos: mesh.pos.slice(), tri: mesh.tri.slice(), kind: mesh.kind.slice(), fixed: mesh.fixed.slice(), loops: mesh.loops.map(l => l.slice()) });
+Wire.rollback = (ws, mesh, snap, Minimal) => {
+  ws.P.set(snap.P); ws.V.set(snap.V); ws.dt = snap.dt; ws.steps = snap.steps; ws.energies = snap.energies.slice();
+  ws.F = snap.F.map(f => f.slice()); ws.fLoops = snap.fLoops.map(f => ({ vert: f.vert.slice(), n: f.n }));
+  mesh.pos = snap.pos.slice(); mesh.tri = snap.tri.slice(); mesh.kind = snap.kind.slice(); mesh.fixed = snap.fixed.slice(); mesh.loops = snap.loops.map(l => l.slice());
+  Minimal.prepare(mesh);
+};
 // One tick of taming with the surface carried along: wire steps until some coarse point has moved `threshold` r_a
 // (or `maxSteps` steps), then the surface follows (apply), is remeshed to the edge length `target` scaled by the
 // wire's growth, and takes a gentle film round.  Returns { steps, moved, remesh, film, pinched }.

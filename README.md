@@ -28,11 +28,14 @@ python3 -m http.server -d ~/Projects/SeifertSurface/web 8766      # then http://
 | `web/js/seifert.js` | braid words, the closed braid, the Bennequin surface as a triangle mesh, the Seifert matrix, `Δ(t)`, signature |
 | `web/js/minimal.js` | discrete minimal surfaces: cotangent Laplacian, conjugate gradients, the harmonic step and mean curvature flow, the harmonic extension that carries the surface with the wire, Delaunay flips, tangential smoothing, isotropic remeshing, the settling schedule with pinch detection, diagnostics, linking numbers |
 | `web/js/wire.js` | taming the wire: Scharein's KnotPlot relaxation of a coarse copy of the boundary loops (springs, repulsion, damped Euler, strands kept apart), the mesh boundary interpolated from it, the carry of the surface |
+| `web/js/precomputed.js` | the shipped films: the binary format, and installing one into a mesh |
 | `web/js/app.js` | viewer and UI |
 | `web/js/vendor/` | three.js r128, OrbitControls, KaTeX 0.16.11 (licenses alongside) |
 | `web/css/` | the stylesheet (EllipticCurve3D's), KaTeX's with its fonts |
 | `web/data/knots.json` | KnotInfo's braid words for the 2,961 knots through 12 crossings and LinkInfo's for the 4,188 links through 11, with the knots' genera |
 | `web/data/braid.sage` | `sage web/data/braid.sage K12n242` (or a PD code, or `DT:[...]`): a braid word for any knot, by SnapPy |
+| `web/data/films/` | the examples' films, computed once and shipped, with `index.json` |
+| `web/data/precompute.mjs` | `node web/data/precompute.mjs`: recomputes them |
 | `web/test/test-seifert.mjs` | `node web/test/test-seifert.mjs`: 206 checks against Sage's values in `vectors.json` (made by `make_vectors.sage`), plus the mesh, the wire, the solver and the whole pipeline |
 
 The web app takes a braid word (`1 2 -1 2`, `s1 s2 s1^-1 s2`, `σ₁σ₂σ₁⁻¹σ₂`, `abAb`, `(1 2)^5`), a torus link `T(p, q)`,
@@ -40,7 +43,9 @@ or a name from the tables (`3_1`, `12n242`, `11n_34`, `L6a4`, `L2a1{1}`, and the
 `hopf`, `whitehead`, `borromean`, `p(-2,3,7)`). It opens on the (−2, 3, 7)-pretzel knot. The info line gives the
 braid, the strands, crossings and components,
 `χ` and the genus of the surface, `Δ(t)`, `det`, `σ`, and whether the surface has the knot's genus (from KnotInfo, or
-from `deg Δ = 2g`). On Build the wire is tamed and the film settled, a few seconds of animation; the status shows
+from `deg Δ = 2g`). The examples appear at once, their films having been computed in advance and shipped (below);
+anything else is tamed and settled in the browser, a few seconds of animation, and so is an example once a setting
+is changed. The status shows
 the phase, the area, the root mean square of the discrete mean curvature `|H|` over the interior (the residual of the
 equation), the vertex count and the wire's growth. **Tame wire** runs the taming again from the wire as it is (for
 after bending it), **Soap film** and **Rubber** are the two pictures of the surface, **Reset** goes back to the
@@ -125,6 +130,12 @@ the surface tracks the film as the wire moves rather than drifting away from it 
 step must not be used while the wire moves: it pulls interior vertices onto the wire where the surface wraps a bend
 faster than any remeshing can collapse them.
 
+A tick that pinches the film is undone, and taming stops there. Taming also keeps a short history of the wires the
+film still followed, one every few ticks: if the film then cannot settle even on the wire taming stopped at, the
+history is walked back until it can, so the wire ends as far open as the film is able to follow it. The 4-strand
+braid in the menu needs this, its two components separating until the film between them closes; without the
+rollback its film is nonsense, with it the film settles at 1,098 taming steps instead of 1,748.
+
 Once the wire is still the film settles (`Minimal.settleRound`): implicit mean curvature flow from a step of one
 edge length squared, doubled while a round moves no vertex more than half an edge, halved and the round undone when
 the solve fails, positive weights and a remeshing every round while the step is small, the exact cotangent weights
@@ -144,6 +155,25 @@ end is the same: it depends
 only on the final wire and on the isotopy class carried along. The order matters for a wire that is not born from
 the scaffold, a parametrised or hand-drawn knot: spanning a *given* wire needs Seifert's algorithm on its projection,
 built in the wire's own geometry, which is in the plan below.
+
+## The shipped films
+
+Taming and settling take a few seconds, which is a few seconds of watching a scaffold turn into a knot. Worth
+watching once; not every time one opens the page. So `web/data/precompute.mjs` runs the pipeline under Node for
+every example of the menu, with the app's own modules and its default parameters, and writes each result to
+`web/data/films/`: a header with the counts and the numbers the app shows (the taming steps, the wire's length
+before and after, the scaffold's edge length, the area), then the vertex positions in single precision, the
+triangles, and the scaffold kinds each vertex came from. 150 kB apiece, 2.8 MB in all, one file fetched per knot,
+and the knot is on the screen in about 50 ms instead of the ten seconds it takes to compute. Everything else is recomputed when the file is read: the boundary loops from the triangles, the coarse wire
+from those loops, the scaffold from the braid word, which is what **Reset** goes back to.
+
+The manifest records the parameters the films were made with, and a film is used only while those are the
+parameters in force; change the disk spacing, the repulsion or the clearance and the app computes the knot here
+instead, as it does for any knot that is not among the examples. The one parameter not compared is the scaffold's
+resolution, which sets the number of rim points only: the shipped mesh carries its own, having been remeshed. The
+tests decode every shipped film and check that it is the settled film of the knot it claims, with the right Euler
+characteristic, the right number of boundary loops, an oriented mesh with no degenerate triangles, a small mean
+curvature and the area the manifest records.
 
 ## The soap-film rendering
 
@@ -317,7 +347,7 @@ node web/test/test-seifert.mjs          # 185 checks
 sage web/test/make_vectors.sage         # regenerates web/data/knots.json and web/test/vectors.json (needs the KnotInfo database in Sage)
 ```
 
-The checks: parsing of every input form; strands, crossings, components and genus of closed braids; the Seifert
+The checks: the shipped films, as above; parsing of every input form; strands, crossings, components and genus of closed braids; the Seifert
 matrix equal to Sage's on 261 connected braids (17 named, 160 random on 2–5 strands, the 85 knots through 9
 crossings), the Alexander polynomial and the signature with them, `deg Δ ≤ 2g(K) ≤ 2g(surface)` against KnotInfo's
 genera; `Δ` of `12n_242` equal to `L(−t)`; the meshes oriented, with `χ = n − c`, the right number of boundary loops,

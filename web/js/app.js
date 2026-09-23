@@ -1,7 +1,8 @@
 /* app.js -- viewer and UI for the Seifert Surface web app.  Globals: THREE, katex, Seifert, Minimal, Wire.
-   Build: the scaffold (Seifert.buildSurface), then the pipeline runs on its own: the wire is tamed with the film
-   following (Wire.carry), then the film settles on the still wire (Minimal.settleRound).  The film is kept settled
-   whenever the wire moves (Tame wire).  Two pictures: the soap film, thin-film interference from a per-vertex
+   Build: the scaffold (Seifert.buildSurface), then either the film that ships with the app for this braid word
+   (data/films/, see precomputed.js), or the pipeline run here: the wire tamed with the film following
+   (Wire.carry), then the film settled on the still wire (Minimal.settleRound).  Tame wire and Reset run it here in
+   any case.  Two pictures: the soap film, thin-film interference from a per-vertex
    thickness, and the two-sided rubber sheet; the Display tab adds the disks and bands and the mean curvature. */
 (function () {
 'use strict';
@@ -307,7 +308,7 @@ function wireOptions() { return { alpha: state.alpha, K: Math.pow(10, state.kh),
 function initWire() { wire = mesh ? Wire.init(mesh, wireOptions()) : null; if (wire) wire.meshEdge = mesh.edge0; }
 function startTaming() {
   if (!mesh || !wire) return;
-  Object.assign(wire.o, wireOptions()); Wire.restart(wire); wire.steps = 0;
+  Object.assign(wire.o, wireOptions()); Wire.restart(wire); wire.steps = 0; history = []; tameTicks = 0;
   phase = 'taming'; remarks = remarks.filter(r => !/^taming|^the film/.test(r)); setRemarks(remarks); schedule(); showButtons();
 }
 function startSettling() {
@@ -315,21 +316,35 @@ function startSettling() {
   settle = Minimal.settleInit(mesh, { every: state.every, tangential: state.tangential }); areas = [];
   phase = 'settling'; schedule(); showButtons();
 }
+// A history of the wires the film still followed, one every few ticks.  A tick that pinches the film is undone and
+// taming stops there; if the film then cannot settle on that wire either, the history is walked back until it can,
+// so the wire ends as far open as the film can follow it.
+const HISTORY_EVERY = 4, HISTORY_MAX = 12;
+let history = [], tameTicks = 0;
 function tameTick() {
+  const snap = Wire.snapshot(wire, mesh);
   const r = Wire.carry(wire, mesh, Minimal, { tangential: state.tangential });
   lastStats = r;
-  buildSurfaceObjects(); buildWire(); keepInView(); showStatus();
   if (r.pinched) {
-    remarks.push(`taming stopped after ${wire.steps} steps: the film began to pinch (a handle closing); the wire would have to open more slowly, or less`);
-    setRemarks(remarks); startSettling(); return;
+    Wire.rollback(wire, mesh, snap, Minimal);
+    remarks.push(`taming stopped after ${wire.steps} steps: the next of them began to pinch the film, a handle of the surface closing, and was undone`);
+    setRemarks(remarks); buildSurfaceObjects(); buildWire(); keepInView(); startSettling(); return;
   }
+  if (tameTicks++ % HISTORY_EVERY === 0) { history.push(snap); if (history.length > HISTORY_MAX) history.shift(); }
+  buildSurfaceObjects(); buildWire(); keepInView(); showStatus();
   if (Wire.settled(wire) || wire.steps >= state.maxsteps) startSettling();
 }
 function settleTick() {
   for (let k = 0; k < state.perframe && phase === 'settling'; k++) {
     const s = Minimal.settleRound(mesh, settle); lastStats = s; areas.push(s.area);
     if (s.remesh) buildSurfaceObjects(); else updateSurfacePositions();
-    if (s.pinched) { phase = 'idle'; remarks.push('the film pinches here: a handle of the surface is closing, so no film of this genus sits on this wire'); setRemarks(remarks); break; }
+    if (s.pinched) {
+      // the film cannot settle on this wire: go back to an earlier one it could follow, and settle there instead
+      const back = history.pop();
+      if (back) { Wire.rollback(wire, mesh, back, Minimal); buildSurfaceObjects(); buildWire(); startSettling(); }
+      else { phase = 'idle'; remarks.push('the film pinches here: a handle of the surface is closing, so no film of this genus sits on this wire'); setRemarks(remarks); }
+      break;
+    }
     if (s.harmonic && areas.length > 5 && (areas[areas.length - 6] - s.area) / s.area < Math.pow(10, state.stop)) { phase = 'idle'; break; }
     if (settle.round > 400) { phase = 'idle'; break; }
   }
@@ -373,6 +388,38 @@ function setInfo(html, cls) { const el = $('info'); el.innerHTML = html; el.clas
 function setRemarks(notes) { const el = $('remarks'); el.innerHTML = notes.map(mixed).join('<br>'); el.hidden = !notes.length; }
 const prettyName = name => name.replace(/^K(\d+)([an]?)_(\d+)$/, (m, a, b, c) => `${a}${b ? b : ''}_{${c}}`).replace(/^L(\d+)([an])(\d+)((?:_\d+)+)$/, (m, a, b, c, d) => `L${a}${b}${c}\\{${d.slice(1).split('_').join(',')}\\}`);
 
+// ------------------------------------------------------------------ the shipped films (data/films/, made by data/precompute.mjs)
+// A film is used when the parameters it was computed with are the ones in force; `angular` is not compared, as it
+// sets the scaffold's resolution only and a shipped mesh carries its own.  Anything else runs the pipeline live.
+let films = null;
+async function loadFilms() {
+  if (films !== null) return films;
+  try {
+    const r = await fetch('data/films/index.json');
+    films = r.ok ? await r.json() : false;
+    if (films && films.version !== Precomputed.VERSION) films = false;
+  } catch (e) { films = false; }
+  return films;
+}
+function filmMatches(m) {
+  if (!m || !m.params) return false;
+  const p = m.params;
+  return p.spacing === state.spacing && p.bandWidth === state.bandwidth && p.bulge === state.bulge && p.round === state.round
+      && p.alpha === state.alpha && p.K === Math.pow(10, state.kh) && p.dclose === state.dclose && p.maxsteps === state.maxsteps;
+}
+// the film for a braid word, decoded, or null
+async function fetchFilm(word) {
+  const m = await loadFilms();
+  if (!filmMatches(m)) return null;
+  const entry = m.films[Precomputed.key(word)];
+  if (!entry) return null;
+  try {
+    const r = await fetch('data/films/' + entry.file);
+    if (!r.ok) return null;
+    return Precomputed.decode(await r.arrayBuffer());
+  } catch (e) { console.warn('the shipped film could not be read, computing it here:', e.message); return null; }
+}
+
 // ------------------------------------------------------------------ the knot table (KnotInfo / LinkInfo braid words, data/knots.json)
 let table = null, tableByName = null, tableByWord = null;
 async function loadTable() {
@@ -407,7 +454,13 @@ async function build(text, opts = {}) {
     Minimal.prepare(mesh); mesh.edge0 = Minimal.meanEdgeLength(mesh); mesh.attrs = ['kind'];
     sizeRadius = Math.max(mesh.params.R + mesh.params.b + mesh.params.W, 0.6 * bd.n * state.spacing + 0.5);
     scaffold = { pos: mesh.pos.slice(), tri: mesh.tri.slice(), kind: mesh.kind.slice(), fixed: mesh.fixed.slice(), loops: mesh.loops.map(l => l.slice()), sizeRadius };
-    initWire(); lastStats = null; areas = [];
+    lastStats = null; areas = []; history = []; tameTicks = 0;
+    const film = opts.live ? null : await fetchFilm(word);     // a shipped film, if this is one of them
+    if (film) {
+      Precomputed.install(mesh, film, Seifert, Minimal);
+      initWire(); wire.L0 = film.L0; wire.steps = film.steps; wire.energies = [];
+      sizeRadius = Math.max(sizeRadius, wireRadius() * 1.05);
+    } else initWire();
     buildSurfaceObjects(); buildGhost(); rebuildDecorations(); if (!opts.keepView) resetView();
     // the info line
     const desc = [];
@@ -428,9 +481,11 @@ async function build(text, opts = {}) {
       if (bd.positive || bd.negative) desc.push(`${bd.positive ? 'positive' : 'negative'} braid`);
     }
     setInfo(desc.join(' | '));
-    remarks.push(`scaffold: ${mesh.pos.length / 3} vertices, ${mesh.tri.length / 3} triangles, wire of ${mesh.loops.reduce((s, l) => s + l.length, 0)} points${state.round ? `, corners rounded at $${state.round}R$` : ''}`);
+    remarks.push(`scaffold: ${scaffold.tri.length / 3} triangles, wire of ${scaffold.loops.reduce((s, l) => s + l.length, 0)} points${state.round ? `, corners rounded at $${state.round}R$` : ''}` +
+                 (film ? `; the film shipped with the app, ${film.steps} taming steps` : ''));
+    if (film && film.pinched) remarks.push('the film pinched while it was computed: a handle of the surface closed, so what is drawn is not a surface of this genus');
     setRemarks(remarks); showStatus(); showButtons();
-    if (state.auto) startTaming();
+    if (!film && state.auto) startTaming();
   } catch (e) {
     mesh = null; scaffold = null; record = null; wire = null; disposeObject(frontMesh); disposeObject(backMesh); disposeObject(soapMesh); disposeObject(ghostMesh); disposeObject(wireGroup); frontMesh = backMesh = soapMesh = ghostMesh = wireGroup = null;
     setInfo(`<span class="err">${mixed(e.message)}</span>`, ''); showStatus();
@@ -472,14 +527,14 @@ function bindRange(id, key, show, onChange) {
   el.addEventListener('change', () => onChange('change'));
 }
 function bindCheck(id, key, onChange) { const el = $(id); el.checked = state[key]; el.addEventListener('change', () => { state[key] = el.checked; onChange(); requestRender(); }); }
-const rebuild = kind => { if (kind === 'change' && lastText && mesh) build(lastText, { keepView: true }); };
+const rebuild = kind => { if (kind === 'change' && lastText && mesh) build(lastText, { keepView: true }); };   // changed parameters no longer match a shipped film, so build() computes live
 bindRange('spacing', 'spacing', v => v.toFixed(2), rebuild);
 bindRange('bandwidth', 'bandwidth', v => v.toFixed(1), rebuild);
 bindRange('bulge', 'bulge', v => v.toFixed(1), rebuild);
 bindRange('angular', 'angular', v => v, rebuild);
 bindRange('round', 'round', v => v.toFixed(2), rebuild);
 bindCheck('auto', 'auto', () => {});
-$('rebuild').addEventListener('click', () => { if (lastText) build(lastText, { keepView: true }); });
+$('rebuild').addEventListener('click', () => { if (lastText) build(lastText, { keepView: true, live: true }); });
 $('alpha').value = state.alpha; $('alpha').addEventListener('change', e => { state.alpha = Number(e.target.value); });
 bindRange('kh', 'kh', v => Math.pow(10, v).toPrecision(2), () => {});
 bindRange('dclose', 'dclose', v => v.toFixed(2), () => {});

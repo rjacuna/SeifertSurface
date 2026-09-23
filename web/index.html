@@ -32,7 +32,7 @@
   <div id="panel">
     <section id="section-surface">
       <h3>The starting surface</h3>
-      <p class="help">One disk per strand, stacked along the braid axis, one half-twisted band per crossing: the Bennequin surface of the closed braid. Its boundary is the wire. On Build the wire is tamed and the film settled on it; untick <b>tame on build</b> to see the scaffold instead.</p>
+      <p class="help">One disk per strand, stacked along the braid axis, one half-twisted band per crossing: the Bennequin surface of the closed braid. Its boundary is the wire. The examples ship with their film already computed; anything else is tamed and settled here, and so is any example once a setting below is changed. Untick <b>tame on build</b> to see the scaffold instead, and <b>Rebuild</b> always computes it here.</p>
       <label>Disk spacing (× radius) <span class="val" id="v-spacing"></span><input id="spacing" type="range" min="0.15" max="1.2" step="0.05"></label>
       <label title="At most 0.8 of the sector between crossings">Band width (× spacing) <span class="val" id="v-bandwidth"></span><input id="bandwidth" type="range" min="0.3" max="3" step="0.1"></label>
       <label>Band bulge (× band width) <span class="val" id="v-bulge"></span><input id="bulge" type="range" min="0.5" max="2" step="0.1"></label>
@@ -87,6 +87,7 @@
 <script src="js/seifert.js"></script>
 <script src="js/minimal.js"></script>
 <script src="js/wire.js"></script>
+<script src="js/precomputed.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
