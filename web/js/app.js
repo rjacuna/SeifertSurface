@@ -15,6 +15,7 @@ const state = { spacing: 0.45, bandwidth: 1.2, bulge: 0.7, angular: isMobile ? 9
                 soapmin: 100, soapmax: 800, soapopacity: 0.35, envbright: 2.5 };
 let mesh = null, scaffold = null, wire = null, record = null, lastText = '', sizeRadius = 2;
 let phase = 'idle', settle = null, areas = [], lastStats = null, remarks = [];   // phase: idle | taming | settling
+const soap = () => state.coloring === 'soap';
 
 // ------------------------------------------------------------------ scene
 const view = $('view');
@@ -35,10 +36,32 @@ const ambient = new THREE.AmbientLight(0xffffff, 0.55); scene.add(ambient);
 const fill = new THREE.DirectionalLight(0xffffff, 0.35); fill.position.set(4, -5, -7); scene.add(fill);
 let dirty = true;
 function requestRender() { dirty = true; }
+// The film's triangles sorted back to front for the current view (the index buffer rewritten), so that its
+// overlapping sheets blend in depth order.  `sortedFor` remembers the view it was done for; a moved surface clears it.
+let sortedFor = null; const sortKeys = { key: null, order: null };
+function sortFilm() {
+  if (!surfaceGeom || !mesh) return;
+  const dir = new THREE.Vector3(); camera.getWorldDirection(dir);
+  const sig = camera.matrixWorld.elements.join(',') + '|' + mesh.tri.length;
+  if (sortedFor === sig) return;
+  sortedFor = sig;
+  const F = mesh.tri.length / 3, p = mesh.pos, t = mesh.tri;
+  if (!sortKeys.key || sortKeys.key.length !== F) { sortKeys.key = new Float32Array(F); sortKeys.order = new Uint32Array(F); }
+  const key = sortKeys.key, order = sortKeys.order;
+  for (let f = 0; f < F; f++) {
+    const a = t[3 * f], b = t[3 * f + 1], c = t[3 * f + 2];
+    key[f] = (p[3 * a] + p[3 * b] + p[3 * c]) * dir.x + (p[3 * a + 1] + p[3 * b + 1] + p[3 * c + 1]) * dir.y + (p[3 * a + 2] + p[3 * b + 2] + p[3 * c + 2]) * dir.z;
+    order[f] = f;
+  }
+  order.sort((i, j) => key[j] - key[i]);                        // farthest first
+  const idx = surfaceGeom.index.array;
+  for (let k = 0; k < F; k++) { const f = order[k]; idx[3 * k] = t[3 * f]; idx[3 * k + 1] = t[3 * f + 1]; idx[3 * k + 2] = t[3 * f + 2]; }
+  surfaceGeom.index.needsUpdate = true;
+}
 (function loop() {
   requestAnimationFrame(loop);
   const moved = controls.update();
-  if (moved || dirty) { renderer.render(scene, camera); dirty = false; }
+  if (moved || dirty) { if (soap()) sortFilm(); renderer.render(scene, camera); dirty = false; }
 })();
 window.addEventListener('resize', () => { renderer.setSize(view.clientWidth, view.clientHeight); camera.aspect = view.clientWidth / view.clientHeight; camera.updateProjectionMatrix(); requestRender(); });
 function resetView() {
@@ -135,12 +158,13 @@ function makeSoapMaterial(side) {
   m.onBeforeCompile = soapShader; m.customProgramCacheKey = () => 'soap-film';
   return m;
 }
-// two passes, the back faces first, then the front ones: a saner blend order for a transparent surface
-const soapMaterial = makeSoapMaterial(THREE.FrontSide), soapBackMaterial = makeSoapMaterial(THREE.BackSide);
+// One two-sided pass whose triangles are sorted back to front whenever the view or the surface changes (below),
+// so that where one sheet of the film lies behind another the blend is in the right order.
+const soapMaterial = makeSoapMaterial(THREE.DoubleSide);
 const WIRE_COLORS = [0x2d4f9e, 0xb3261e, 0xd08a00, 0x5b2a86, 0x0b7a75, 0x7a4a00];
 const wireMetal = new THREE.MeshStandardMaterial({ color: 0x3a3d42, metalness: 0.9, roughness: 0.35 });
 const group = new THREE.Group(); scene.add(group);
-let surfaceGeom = null, frontMesh = null, backMesh = null, soapMesh = null, soapBackMesh = null, ghostMesh = null, wireGroup = null, axesGroup = null, tubeMaterials = [];
+let surfaceGeom = null, frontMesh = null, backMesh = null, soapMesh = null, ghostMesh = null, wireGroup = null, axesGroup = null, tubeMaterials = [];
 const SERIF = '"STIX Two Text", "STIX Two Math", "Times New Roman", Times, serif';
 function makeLabel(text, x, y, z) {
   const canvas = document.createElement('canvas'), ctx = canvas.getContext('2d'), pr = 2, fs = 24;
@@ -159,7 +183,6 @@ function buildAxes(R) {
   return grp;
 }
 function disposeObject(obj) { if (!obj) return; group.remove(obj); obj.traverse(o => { if (o.geometry) o.geometry.dispose(); }); }
-const soap = () => state.coloring === 'soap';
 function buildWire() {
   disposeObject(wireGroup); wireGroup = new THREE.Group(); tubeMaterials = [];
   if (!mesh) return;
@@ -175,7 +198,7 @@ function buildWire() {
   wireGroup.visible = state.wire; group.add(wireGroup);
 }
 function buildSurfaceObjects() {                                 // (re)creates the geometry: after a build, a remeshing, a reset
-  disposeObject(frontMesh); disposeObject(backMesh); disposeObject(soapMesh); disposeObject(soapBackMesh); frontMesh = backMesh = soapMesh = soapBackMesh = null;
+  disposeObject(frontMesh); disposeObject(backMesh); disposeObject(soapMesh); frontMesh = backMesh = soapMesh = null;
   if (!mesh) return;
   surfaceGeom = new THREE.BufferGeometry();
   surfaceGeom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(mesh.pos), 3));
@@ -184,8 +207,9 @@ function buildSurfaceObjects() {                                 // (re)creates 
   surfaceGeom.setIndex(new THREE.BufferAttribute(new Uint32Array(mesh.tri), 1));
   surfaceGeom.computeVertexNormals();
   frontMesh = new THREE.Mesh(surfaceGeom, frontMaterial); backMesh = new THREE.Mesh(surfaceGeom, backMaterial);
-  soapBackMesh = new THREE.Mesh(surfaceGeom, soapBackMaterial); soapBackMesh.renderOrder = 1; soapMesh = new THREE.Mesh(surfaceGeom, soapMaterial); soapMesh.renderOrder = 2;
-  group.add(frontMesh); group.add(backMesh); group.add(soapBackMesh); group.add(soapMesh);
+  soapMesh = new THREE.Mesh(surfaceGeom, soapMaterial); soapMesh.renderOrder = 2;
+  group.add(frontMesh); group.add(backMesh); group.add(soapMesh);
+  sortedFor = null;
   applyColoring(); applyOpacity();
 }
 function buildGhost() {
@@ -200,7 +224,7 @@ function updateSurfacePositions() {                              // the same ver
   if (!surfaceGeom) return;
   if (surfaceGeom.attributes.position.array.length !== mesh.pos.length || surfaceGeom.index.array.length !== mesh.tri.length) { buildSurfaceObjects(); return; }
   surfaceGeom.attributes.position.array.set(mesh.pos); surfaceGeom.attributes.position.needsUpdate = true;
-  surfaceGeom.index.array.set(mesh.tri); surfaceGeom.index.needsUpdate = true;
+  surfaceGeom.index.array.set(mesh.tri); surfaceGeom.index.needsUpdate = true; sortedFor = null;
   surfaceGeom.computeVertexNormals();
   if (state.coloring === 'curvature') applyColoring();
   requestRender();
@@ -210,7 +234,7 @@ const PART_COLORS = [[0.22, 0.60, 0.36], [0.16, 0.44, 0.70], [0.80, 0.55, 0.10],
 function applyColoring() {
   if (!surfaceGeom) return;
   const s = soap(), vertexColors = !s && state.coloring !== 'sides';
-  frontMesh.visible = backMesh.visible = !s; soapMesh.visible = soapBackMesh.visible = s;
+  frontMesh.visible = backMesh.visible = !s; soapMesh.visible = s; sortedFor = null;
   renderer.setClearColor(0xffffff, 1); scene.background = s ? envTexture : null;
   ambient.intensity = s ? 0.25 : 0.55;
   if (wireGroup) wireGroup.children.forEach((m, k) => { m.material = s ? wireMetal : tubeMaterials[k]; });
@@ -231,7 +255,7 @@ function applyColoring() {
 }
 function applyOpacity() {
   for (const m of [frontMaterial, backMaterial]) { m.opacity = state.opacity; m.depthWrite = state.opacity >= 1; m.wireframe = state.wireframe; }
-  for (const m of [soapMaterial, soapBackMaterial]) { m.wireframe = state.wireframe; m.envMapIntensity = state.envbright; }
+  soapMaterial.wireframe = state.wireframe; soapMaterial.envMapIntensity = state.envbright;
   soapUniforms.uSoapOpacity.value = state.soapopacity;
   requestRender();
 }
@@ -445,7 +469,7 @@ async function build(text, opts = {}) {
     setRemarks(remarks); showStatus(); showButtons();
     if (state.auto) startTaming();
   } catch (e) {
-    mesh = null; scaffold = null; record = null; wire = null; disposeObject(frontMesh); disposeObject(backMesh); disposeObject(soapMesh); disposeObject(soapBackMesh); disposeObject(ghostMesh); disposeObject(wireGroup); frontMesh = backMesh = soapMesh = soapBackMesh = ghostMesh = wireGroup = null;
+    mesh = null; scaffold = null; record = null; wire = null; disposeObject(frontMesh); disposeObject(backMesh); disposeObject(soapMesh); disposeObject(ghostMesh); disposeObject(wireGroup); frontMesh = backMesh = soapMesh = ghostMesh = wireGroup = null;
     setInfo(`<span class="err">${mixed(e.message)}</span>`, ''); showStatus();
   } finally { $('busy').hidden = true; requestRender(); }
 }

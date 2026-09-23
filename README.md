@@ -158,7 +158,9 @@ higher orders. Three.js's own iridescence was tried first and set aside: it mode
 refractive index 1.5, not a film in air, and gives a purple cast. No diffuse colour, a water-like Fresnel response
 from the physically based model, a painted room as the environment (prefiltered for reflections) and as the
 background, the film's opacity to what lies behind it rising with the Fresnel term at grazing angles, the reflected
-light added unweighted, back faces drawn before front faces. The wire becomes dark metal. It is rasterised, not
+light added unweighted, and the film's triangles sorted back to front for the current view whenever the camera or
+the surface moves (its index buffer rewritten), so that where one sheet of the film lies behind another the blend
+is in depth order rather than mesh order. The wire becomes dark metal. It is rasterised, not
 ray-traced: for an interactive viewer this is the right baseline, and the mesh can be exported to a path tracer for
 a still. The thickness range, the opacity and the light are in the Display tab.
 
@@ -322,7 +324,7 @@ settles); a stress test of taming with film rounds.
   in the wire's own geometry and the wire comes first. Van Wijk and Cohen list the same as future work.
 * **Diagrams as input.** PD and DT codes through `braid.sage` (SnapPy's Vogel algorithm), as `SkeinA/data/braids.txt`
   already does for the census.
-* **A self-intersection check** during the flow, and order-independent transparency for the film when its parts overlap on screen.
+* **A self-intersection check** during the flow; order-independent transparency for the film only if sorted triangles ever prove insufficient (they are exact unless triangles intersect).
 * **The global minimiser.** Wang–Chern's minimal currents for the area-minimising surface over all topologies, to compare with the fixed-topology one: when they differ, the wire's least-area surface is not the Bennequin surface's isotopy class.
 * **Export** of the relaxed mesh (OBJ/STL) for printing, and GitHub Pages as for EllipticCurve3D.
 
