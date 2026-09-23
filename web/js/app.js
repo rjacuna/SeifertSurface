@@ -12,7 +12,7 @@ const state = { spacing: 0.45, bandwidth: 1.2, bulge: 0.7, angular: isMobile ? 9
                 alpha: 0, kh: 0, dclose: 2, maxsteps: 2500, brush: 0.08, drag: false,          // the wire: kh is log10 of K/H
                 every: 5, tangential: 0.3, perframe: 2, stop: -7,                                // the film
                 coloring: 'sides', opacity: 1, wireframe: false, wire: true, thick: 0.02, ghost: false, axes: false,
-                soapmin: 100, soapmax: 800, soapopacity: 0.35, envbright: 2.5, wiremetal: 'gold' };
+                soapmin: 100, soapmax: 800, soapopacity: 0.35, envbright: 1.2, wiremetal: 'gold' };
 let mesh = null, scaffold = null, wire = null, record = null, lastText = '', sizeRadius = 2;
 let phase = 'idle', settle = null, areas = [], lastStats = null, remarks = [];   // phase: idle | taming | settling
 const soap = () => state.coloring === 'soap';
@@ -84,10 +84,12 @@ function keepInView() {                                          // the wire gro
 function makeEnvironment() {
   const W = 1024, H = 512, canvas = document.createElement('canvas'); canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext('2d'), g = ctx.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0, '#f2f5f8'); g.addColorStop(0.45, '#b8c0ca'); g.addColorStop(0.55, '#6f7780'); g.addColorStop(1, '#2a2f36');
+  // a studio: bright above, a mid-grey horizon, a dark floor, so that a metal reflects both light and dark
+  g.addColorStop(0, '#eef1f4'); g.addColorStop(0.42, '#aeb5bd'); g.addColorStop(0.5, '#5e656e'); g.addColorStop(0.62, '#2c3036'); g.addColorStop(1, '#14171b');
   ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-  const light = (x, y, w, h, color) => { const r = ctx.createRadialGradient(x, y, 0, x, y, Math.max(w, h)); r.addColorStop(0, color); r.addColorStop(0.7, color); r.addColorStop(1, 'rgba(255,255,255,0)'); ctx.fillStyle = r; ctx.fillRect(x - w, y - h, 2 * w, 2 * h); };
-  light(180, 120, 180, 90, '#ffffff'); light(620, 90, 140, 80, '#fff4e0'); light(880, 170, 80, 140, '#e8f0ff'); light(400, 330, 260, 40, '#ffffff'); light(760, 380, 120, 50, '#ffe9d0');
+  // softboxes with soft edges: a large warm key, a cool fill, a long thin strip (the highlight that reads as metal), a warm spot
+  const box = (x, y, w, h, color, soft) => { const r = ctx.createRadialGradient(x, y, 0, x, y, 1); ctx.save(); ctx.translate(x, y); ctx.scale(w, h); r.addColorStop(0, color); r.addColorStop(soft, color); r.addColorStop(1, 'rgba(255,255,255,0)'); ctx.fillStyle = r; ctx.fillRect(-1, -1, 2, 2); ctx.restore(); };
+  box(190, 130, 210, 110, '#fff6e6', 0.75); box(860, 150, 120, 170, '#e9f0ff', 0.7); box(500, 215, 330, 22, '#ffffff', 0.8); box(640, 330, 90, 40, '#ffe2b8', 0.6); box(330, 400, 160, 30, '#ffffff', 0.5);
   const tex = new THREE.CanvasTexture(canvas); tex.mapping = THREE.EquirectangularReflectionMapping; tex.encoding = THREE.sRGBEncoding;
   const pmrem = new THREE.PMREMGenerator(renderer); pmrem.compileEquirectangularShader();
   const env = pmrem.fromEquirectangular(tex).texture; tex.dispose(); pmrem.dispose();
@@ -164,7 +166,9 @@ const soapMaterial = makeSoapMaterial(THREE.DoubleSide);
 const WIRE_COLORS = [0x2d4f9e, 0xb3261e, 0xd08a00, 0x5b2a86, 0x0b7a75, 0x7a4a00];
 // the wire in the soap-film picture: gold by default (its colour is the metal's reflectance, tinting the room it
 // reflects), or steel
-const WIRE_METALS = { gold: new THREE.MeshStandardMaterial({ color: 0xffc860, metalness: 1, roughness: 0.22 }), steel: new THREE.MeshStandardMaterial({ color: 0xb8bcc4, metalness: 1, roughness: 0.3 }), dark: new THREE.MeshStandardMaterial({ color: 0x3a3d42, metalness: 0.9, roughness: 0.35 }) };
+// measured reflectances of the metals, in linear light (gold 1.00, 0.71, 0.29; steel 0.56, 0.57, 0.58), as
+// MeshStandardMaterial takes the colour of a full metal for its F0
+const WIRE_METALS = { gold: new THREE.MeshStandardMaterial({ color: new THREE.Color(1.0, 0.71, 0.29), metalness: 1, roughness: 0.18 }), steel: new THREE.MeshStandardMaterial({ color: new THREE.Color(0.56, 0.57, 0.58), metalness: 1, roughness: 0.25 }), dark: new THREE.MeshStandardMaterial({ color: new THREE.Color(0.05, 0.05, 0.06), metalness: 0.9, roughness: 0.35 }) };
 const wireMetal = () => WIRE_METALS[state.wiremetal] || WIRE_METALS.gold;
 const group = new THREE.Group(); scene.add(group);
 let surfaceGeom = null, frontMesh = null, backMesh = null, soapMesh = null, ghostMesh = null, wireGroup = null, axesGroup = null, tubeMaterials = [];
@@ -193,7 +197,7 @@ function buildWire() {
     const pts = loop.map(v => new THREE.Vector3(mesh.pos[3 * v], mesh.pos[3 * v + 1], mesh.pos[3 * v + 2]));
     if (pts.length < 3) return;
     const curve = new THREE.CatmullRomCurve3(pts, true, 'centripetal');
-    const tube = new THREE.TubeGeometry(curve, Math.min(1200, 2 * pts.length), state.thick, 10, true);
+    const tube = new THREE.TubeGeometry(curve, Math.min(1200, 2 * pts.length), state.thick, 16, true);
     const mat = new THREE.MeshPhongMaterial({ color: WIRE_COLORS[k % WIRE_COLORS.length], shininess: 50, specular: new THREE.Color(0x333344) });
     tubeMaterials.push(mat);
     wireGroup.add(new THREE.Mesh(tube, soap() ? wireMetal() : mat));
@@ -239,6 +243,7 @@ function applyColoring() {
   const s = soap(), vertexColors = !s && state.coloring !== 'sides';
   frontMesh.visible = backMesh.visible = !s; soapMesh.visible = s; sortedFor = null;
   renderer.setClearColor(0xffffff, 1); scene.background = s ? envTexture : null;
+  renderer.outputEncoding = s ? THREE.sRGBEncoding : THREE.LinearEncoding;   // the film and the metal are lit in linear light and encoded for the screen
   ambient.intensity = s ? 0.25 : 0.55;
   if (wireGroup) wireGroup.children.forEach((m, k) => { m.material = s ? wireMetal() : tubeMaterials[k]; });
   for (const m of [frontMaterial, backMaterial]) { m.vertexColors = vertexColors; m.needsUpdate = true; }

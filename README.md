@@ -160,7 +160,12 @@ from the physically based model, a painted room as the environment (prefiltered 
 background, the film's opacity to what lies behind it rising with the Fresnel term at grazing angles, the reflected
 light added unweighted, and the film's triangles sorted back to front for the current view whenever the camera or
 the surface moves (its index buffer rewritten), so that where one sheet of the film lies behind another the blend
-is in depth order rather than mesh order. The wire becomes gold (or steel, or dark metal, in the Display tab). It is rasterised, not
+is in depth order rather than mesh order. In this mode the scene is lit in linear light and encoded to sRGB for the
+screen, as physically based rendering needs (the two-sided view keeps the plain pipeline it always had), and the
+environment is a studio: bright above, a dark floor, a warm key softbox, a cool fill, a long thin strip light. The
+wire becomes gold, a full metal whose colour is gold's measured reflectance (1.00, 0.71, 0.29 in linear light) and
+which therefore looks like gold only because it reflects that studio, its highlights and its dark floor; steel and
+dark metal are the alternatives in the Display tab. It is rasterised, not
 ray-traced: for an interactive viewer this is the right baseline, and the mesh can be exported to a path tracer for
 a still. The thickness range, the opacity and the light are in the Display tab.
 
