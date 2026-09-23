@@ -35,6 +35,21 @@ const COMMON = {
 Seifert.commonName = name => COMMON[name] || COMMON[String(name).replace(/(_\d+)+$/, '')] || null;
 // the Rolfsen tag as TeX, for the knots that have one (to ten crossings, where the tables need no a/n letter)
 Seifert.rolfsenTeX = name => { const m = /^K(\d{1,2})_(\d+)$/.exec(name || ''); return m && +m[1] <= 10 ? `${m[1]}_{${m[2]}}` : null; };
+// The same names as plain text, with Unicode subscripts, for a <select> and anywhere else that cannot take TeX.
+// Below eleven crossings the Rolfsen tag and the modern name read alike, so one function gives both.
+const SUBSCRIPTS = '₀₁₂₃₄₅₆₇₈₉';
+const subscript = n => String(n).split('').map(d => SUBSCRIPTS[+d] || d).join('');
+Seifert.nameText = name => {
+  const common = Seifert.commonName(name);
+  if (common) return common;
+  let m = /^K(\d+)([an]?)_(\d+)$/.exec(name || '');
+  if (m) return `${m[1]}${m[2]}${subscript(m[3])}`;
+  m = /^L(\d+)([an])(\d+)((?:_\d+)*)$/.exec(name || '');
+  if (m) return `L${m[1]}${m[2]}${m[3]}` + (m[4] ? `{${m[4].slice(1).split('_').join(',')}}` : '');
+  return null;
+};
+// a braid word as plain text: σ₁σ₂σ₁⁻¹σ₂
+Seifert.wordSymbols = word => word.length ? word.map(g => 'σ' + subscript(Math.abs(g)) + (g < 0 ? '⁻¹' : '')).join('') : '1';
 // the modern name as TeX: 11n_{34}, L6a4\{0,0\}
 Seifert.modernTeX = name => {
   let m = /^K(\d+)([an]?)_(\d+)$/.exec(name || '');

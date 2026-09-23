@@ -45,7 +45,8 @@ knot and gives what is read off the braid: `χ` and the genus of the surface, `�
 common one where a knot has one (trefoil, Hopf link, Conway knot, Borromean rings), else its Rolfsen tag (`8₁₉`,
 which the tables carry to ten crossings), else the modern name of the Hoste–Thistlethwaite tables (`12n₂₄₂`,
 `L6a4{0,0}`); a braid word that is no knot of the tables is called by the torus link it was typed as, or by the
-word itself. The examples appear at once, their films having been computed in advance and shipped (below);
+word itself. The Examples menu is labelled by the same rule, from the same functions, so the two cannot drift
+apart. The examples appear at once, their films having been computed in advance and shipped (below);
 anything else is tamed and settled in the browser, a few seconds of animation, and so is an example once a setting
 is changed. While that runs, a line beside the buttons says what is happening and how far it has got; a settled film
 says nothing. **Tame wire** runs the taming again from the wire as it is (for

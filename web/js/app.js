@@ -393,6 +393,7 @@ let buildToken = 0;
 // called by the torus link it was typed as, or by the word itself.  Which of these is known can arrive late, when
 // the knot table does, and the line is rendered again then.
 function knotTitle(name, label, word) {
+  if (!word.length) return esc(Seifert.commonName('K0_1'));      // the empty braid closes to the unknot
   if (name) {
     const common = Seifert.commonName(name);
     if (common) return esc(common);
@@ -521,13 +522,18 @@ function updateHash(text) { try { history.replaceState(null, '', hashFor(text));
 function shareLink() { return location.origin + location.pathname + location.search + (lastText ? hashFor(lastText) : location.hash); }
 
 // ------------------------------------------------------------------ UI wiring
-const EXAMPLES = [
-  ['trefoil  3₁ = T(2,3)', '3_1'], ['figure-eight  4₁', '4_1'], ['cinquefoil  5₁ = T(2,5)', '5_1'], ['5₂', '5_2'], ['stevedore  6₁', '6_1'], ['6₂', '6_2'], ['6₃', '6_3'],
-  ['8₁₉ = T(3,4)', '8_19'], ['10₁₂₄ = T(3,5)', '10_124'], ['12n₂₄₂ = P(−2,3,7)', '12n242'], ['Conway knot  11n₃₄', '11n34'],
-  ['Hopf link', 'hopf'], ['Whitehead link', 'whitehead'], ['Borromean rings', 'borromean'], ['T(4,5)', 'T(4,5)'], ['T(2,7)', 'T(2,7)'], ['T(3,6)  (3 components)', 'T(3,6)'],
-  ['a 4-strand braid', '1 2 3 -1 2 -3 1 2'], ['unknot, one disk', '()'],
-];
-for (const [label, value] of EXAMPLES) { const o = document.createElement('option'); o.value = value; o.textContent = label; $('examples').appendChild(o); }
+// The examples, by the inputs that make them; each is labelled the way the info line will name it (the common
+// name, else the Rolfsen tag, else the modern one, else what it was typed as), so the two cannot drift apart.
+const EXAMPLES = ['3_1', '4_1', '5_1', '5_2', '6_1', '6_2', '6_3', '7_1', '8_19', '10_124', '11n34', '12n242',
+                  'hopf', 'whitehead', 'borromean', 'T(3,6)', 'T(4,5)', '1 2 3 -1 2 -3 1 2', '()'];
+function exampleLabel(input) {
+  const p = Seifert.parseBraid(input);
+  if (p.error) return input;
+  if (p.name) return Seifert.nameText(p.name) || p.name;
+  if (!p.word.length) return Seifert.commonName('K0_1');
+  return p.label || Seifert.wordSymbols(p.word);
+}
+for (const value of EXAMPLES) { const o = document.createElement('option'); o.value = value; o.textContent = exampleLabel(value); $('examples').appendChild(o); }
 $('examples').addEventListener('change', e => { if (e.target.value) build(e.target.value); e.target.value = ''; });
 $('build').addEventListener('click', () => build($('input').value));
 $('input').addEventListener('keydown', e => { if (e.key === 'Enter') build($('input').value); });

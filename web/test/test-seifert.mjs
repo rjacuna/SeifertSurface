@@ -236,10 +236,15 @@ function turning(ws) {                                       // total turning an
   check('names: none invented for the unnamed', [Seifert.commonName('K7_2'), Seifert.commonName('K11a_1'), Seifert.commonName('K10_124')].every(v => v === null));
   check('names: Rolfsen tags to ten crossings only', Seifert.rolfsenTeX('K3_1') === '3_{1}' && Seifert.rolfsenTeX('K10_124') === '10_{124}' && Seifert.rolfsenTeX('K11n_34') === null && Seifert.rolfsenTeX('K11a_1') === null && Seifert.rolfsenTeX('L6a4_0') === null);
   check('names: the modern ones for knots and links', Seifert.modernTeX('K12n_242') === '12n_{242}' && Seifert.modernTeX('K11a_1') === '11a_{1}' && Seifert.modernTeX('L6a4_0_0') === 'L6a4\\{0,0\\}' && Seifert.modernTeX('L5a1') === 'L5a1');
+  check('names: as plain text, with subscripts', Seifert.nameText('K3_1') === 'trefoil' && Seifert.nameText('K6_3') === '6₃' && Seifert.nameText('K10_124') === '10₁₂₄'
+        && Seifert.nameText('K12n_242') === '(−2, 3, 7)-pretzel knot' && Seifert.nameText('K11a_1') === '11a₁' && Seifert.nameText('L6a4_0_0') === 'Borromean rings' && Seifert.nameText('L6a5_1_0') === 'L6a5{1,0}');
+  check('names: a braid word as plain text', Seifert.wordSymbols([1, 2, -1]) === 'σ₁σ₂σ₁⁻¹' && Seifert.wordSymbols([]) === '1' && Seifert.wordSymbols([-11]) === 'σ₁₁⁻¹');
   // every name the table can produce is displayable one way or another
   const table = JSON.parse(fs.readFileSync(new URL('../data/knots.json', import.meta.url)));
   const unnameable = table.filter(r => !Seifert.commonName(r.name) && !Seifert.rolfsenTeX(r.name) && !Seifert.modernTeX(r.name));
   check(`names: all ${table.length} table entries have a name to show`, unnameable.length === 0, unnameable.slice(0, 5).map(r => r.name).join(' '));
+  const noText = table.filter(r => !Seifert.nameText(r.name));
+  check(`names: and a plain-text one`, noText.length === 0, noText.slice(0, 5).map(r => r.name).join(' '));
 }
 
 // ---- the shipped films (web/data/films, made by web/data/precompute.mjs) ----
@@ -253,8 +258,9 @@ function turning(ws) {                                       // total turning an
     const table = JSON.parse(fs.readFileSync(new URL('../data/knots.json', import.meta.url)));
     const byName = new Map(table.map(r => [r.name, r]));
     // every example of the app's menu has one, under the key of its braid word
-    const EXAMPLES = ['3_1', '4_1', '5_1', '5_2', '6_1', '6_2', '6_3', '8_19', '10_124', '12n242', '11n34',
-                      'hopf', 'whitehead', 'borromean', 'T(4,5)', 'T(2,7)', 'T(3,6)', '1 2 3 -1 2 -3 1 2', '()'];
+    const app = fs.readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+    const EXAMPLES = JSON.parse('[' + /const EXAMPLES = \[([^\]]*)\]/.exec(app)[1].replace(/'/g, '"') + ']');
+    check('films: the app lists examples', EXAMPLES.length >= 15);
     const missing = [];
     for (const input of EXAMPLES) {
       const p = Seifert.parseBraid(input);

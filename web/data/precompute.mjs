@@ -21,8 +21,8 @@ const here = path.dirname(fileURLToPath(import.meta.url)), out = path.join(here,
 const PARAMS = { spacing: 0.45, bandWidth: 1.2, bulge: 0.7, round: 0.1, alpha: 0, K: 1, dclose: 2, maxsteps: 2500, angular: 144 };
 const SETTLE = { every: 5, tangential: 0.3, stop: -7, maxRounds: 400 };
 // the inputs of the app's Examples menu
-const EXAMPLES = ['3_1', '4_1', '5_1', '5_2', '6_1', '6_2', '6_3', '8_19', '10_124', '12n242', '11n34',
-                  'hopf', 'whitehead', 'borromean', 'T(4,5)', 'T(2,7)', 'T(3,6)', '1 2 3 -1 2 -3 1 2', '()'];
+const EXAMPLES = ['3_1', '4_1', '5_1', '5_2', '6_1', '6_2', '6_3', '7_1', '8_19', '10_124', '11n34', '12n242',
+                  'hopf', 'whitehead', 'borromean', 'T(3,6)', 'T(4,5)', '1 2 3 -1 2 -3 1 2', '()'];
 
 const table = JSON.parse(fs.readFileSync(path.join(here, 'knots.json')));
 const byName = new Map(table.map(r => [r.name, r]));
@@ -78,7 +78,7 @@ function compute(word) {
 const want = process.argv.slice(2), inputs = want.length ? want : EXAMPLES;
 fs.mkdirSync(out, { recursive: true });
 const manifestPath = path.join(out, 'index.json');
-const manifest = fs.existsSync(manifestPath) ? JSON.parse(fs.readFileSync(manifestPath)) : { version: Precomputed.VERSION, params: PARAMS, settle: SETTLE, names: {}, films: {} };
+const manifest = (want.length && fs.existsSync(manifestPath)) ? JSON.parse(fs.readFileSync(manifestPath)) : { version: Precomputed.VERSION, params: PARAMS, settle: SETTLE, names: {}, films: {} };
 manifest.version = Precomputed.VERSION; manifest.params = PARAMS; manifest.settle = SETTLE; manifest.names = manifest.names || {};
 let total = 0;
 for (const input of inputs) {
@@ -96,6 +96,12 @@ for (const input of inputs) {
   console.log(`${input.padEnd(18)} ${String(mesh.pos.length / 3).padStart(6)} vertices  ${(buf.byteLength / 1024).toFixed(0).padStart(4)} kB  ` +
               `${ws.steps} taming steps, ${rounds} film rounds, wire ×${(Wire.length(ws) / ws.L0).toFixed(2)}, area ${area.toFixed(3)}, rms |H| ${H.rms.toFixed(3)}` +
               `${pinched ? ', PINCHED' : ''}${rolled ? ', taming rolled back at a pinch' : ''}${capped ? ', taming capped' : ''}  (${((Date.now() - t0) / 1000).toFixed(1)} s)`);
+}
+// a full run owns the directory: films no longer listed are stale and go
+if (!want.length) {
+  const kept = new Set(Object.values(manifest.films).map(f => f.file));
+  for (const f of fs.readdirSync(out)) if (f.endsWith('.bin') && !kept.has(f)) { fs.unlinkSync(path.join(out, f)); console.log(`removed the stale ${f}`); }
+  for (const [name, key] of Object.entries(manifest.names)) if (!manifest.films[key]) delete manifest.names[name];
 }
 fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 1) + '\n');
 console.log(`\n${inputs.length} films, ${(total / 1024 / 1024).toFixed(2)} MB written, manifest with ${Object.keys(manifest.films).length} entries`);
