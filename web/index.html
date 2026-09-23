@@ -15,8 +15,8 @@
   <select id="examples" title="Examples"><option value="">Examples…</option></select>
   <div id="flowbar">
     <button id="tame" type="button" class="primary" aria-label="tame the wire again, or pause" title="Relax the wire as a knot (Scharein's KnotPlot forces), the film following; the wire starts tame, this is for after bending it">▶ Tame wire</button>
-    <button id="drag" type="button" aria-pressed="false" title="Drag a point of the wire with the pointer; the film follows">✋ Drag wire</button>
-    <button id="soap" type="button" aria-pressed="false" title="Render the surface as a soap film: thin-film interference from a thickness field">◐ Soap film</button>
+    <button id="soap" type="button" aria-pressed="true" title="The surface as a soap film: thin-film interference from a thickness field">◐ Soap film</button>
+    <button id="rubber" type="button" aria-pressed="false" title="The surface as a two-sided rubber sheet: green on one side, red on the other, which is what it means for it to be orientable">◑ Rubber</button>
     <button id="reset-surface" type="button" title="Back to the stacked disks and bands, then tame and settle again">Reset</button>
     <span id="status" class="val"></span>
   </div>
@@ -48,13 +48,10 @@
       <label title="K/H, the repulsion relative to the springs">Repulsion strength <span class="val" id="v-kh"></span><input id="kh" type="range" min="-1" max="1" step="0.1"></label>
       <label title="Strands may not come closer than this many spacings of the coarse wire">Clearance (× spacing) <span class="val" id="v-dclose"></span><input id="dclose" type="range" min="0.5" max="4" step="0.25"></label>
       <label title="A cycle stops when the energy has stopped falling, or here">Steps at most <span class="val" id="v-maxsteps"></span><input id="maxsteps" type="range" min="200" max="5000" step="100"></label>
-      <h3>By hand</h3>
-      <p class="help">With <b>Drag wire</b> on, drag a point of the wire; it moves in the plane facing you, its neighbours along the loop with it, and the film follows. Nothing stops a strand from being pushed through another here; <b>Tame wire</b> afterwards relaxes it again.</p>
-      <label title="Width of the Gaussian falloff along the loop, as a fraction of the loop's length">Brush (× loop length) <span class="val" id="v-brush"></span><input id="brush" type="range" min="0.01" max="0.3" step="0.01"></label>
     </section>
     <section id="section-flow" hidden>
       <h3>The film</h3>
-      <p class="help">The surface shown is the soap film on the wire, kept settled: implicit mean curvature flow with a growing step, then the harmonic step (Pinkall–Polthier), remeshing and tangential smoothing between rounds. It starts again whenever the wire moves.</p>
+      <p class="help">The surface shown is always the soap film on the wire, kept settled: implicit mean curvature flow with a growing step, then the harmonic step (Pinkall–Polthier), remeshing and tangential smoothing between rounds. It starts again whenever the wire moves.</p>
       <label>Remesh every (rounds) <span class="val" id="v-every"></span><input id="every" type="range" min="1" max="20" step="1"></label>
       <label title="Move each interior vertex a fraction of the way to the centroid of its neighbours, within the tangent plane">Tangential smoothing <span class="val" id="v-tangential"></span><input id="tangential" type="range" min="0" max="0.8" step="0.05"></label>
       <label>Rounds per tick <span class="val" id="v-perframe"></span><input id="perframe" type="range" min="1" max="10" step="1"></label>
@@ -62,7 +59,7 @@
     </section>
     <section id="section-display" hidden>
       <h3>Display</h3>
-      <label>Coloring <select id="coloring"><option value="sides">two sides</option><option value="parts">disks and bands</option><option value="curvature">mean curvature</option><option value="soap">soap film</option></select></label>
+      <label>Coloring <select id="coloring"><option value="soap">soap film</option><option value="sides">two sides (rubber)</option><option value="parts">disks and bands</option><option value="curvature">mean curvature</option></select></label>
       <label>Opacity <span class="val" id="v-opacity"></span><input id="opacity" type="range" min="0.05" max="1" step="0.05"></label>
       <label>Wireframe <input id="wireframe" type="checkbox"></label>
       <h3>Soap film</h3>

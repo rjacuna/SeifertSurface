@@ -1,20 +1,21 @@
 /* app.js -- viewer and UI for the Seifert Surface web app.  Globals: THREE, katex, Seifert, Minimal, Wire.
    Build: the scaffold (Seifert.buildSurface), then the pipeline runs on its own: the wire is tamed with the film
    following (Wire.carry), then the film settles on the still wire (Minimal.settleRound).  The film is kept settled
-   whenever the wire moves (a drag, or Tame wire again).  Coloring: two sides, disks and bands, mean curvature, or a
-   soap film with thin-film interference from a per-vertex thickness. */
+   whenever the wire moves (Tame wire).  Two pictures: the soap film, thin-film interference from a per-vertex
+   thickness, and the two-sided rubber sheet; the Display tab adds the disks and bands and the mean curvature. */
 (function () {
 'use strict';
 const $ = id => document.getElementById(id);
 const isMobile = matchMedia('(max-width: 640px)').matches || navigator.maxTouchPoints > 1;
 
 const state = { spacing: 0.45, bandwidth: 1.2, bulge: 0.7, angular: isMobile ? 96 : 144, round: 0.1, auto: true,
-                alpha: 0, kh: 0, dclose: 2, maxsteps: 2500, brush: 0.08, drag: false,          // the wire: kh is log10 of K/H
+                alpha: 0, kh: 0, dclose: 2, maxsteps: 2500,                                     // the wire: kh is log10 of K/H
                 every: 5, tangential: 0.3, perframe: 2, stop: -7,                                // the film
-                coloring: 'sides', opacity: 1, wireframe: false, wire: true, thick: 0.02, ghost: false, axes: false,
+                coloring: 'soap', opacity: 1, wireframe: false, wire: true, thick: 0.02, ghost: false, axes: false,
                 soapmin: 100, soapmax: 800, soapopacity: 0.35, envbright: 1.2, wiremetal: 'gold' };
 let mesh = null, scaffold = null, wire = null, record = null, lastText = '', sizeRadius = 2;
 let phase = 'idle', settle = null, areas = [], lastStats = null, remarks = [];   // phase: idle | taming | settling
+let surfaceGeom = null, frontMesh = null, backMesh = null, soapMesh = null, ghostMesh = null, wireGroup = null, axesGroup = null, tubeMaterials = [];
 const soap = () => state.coloring === 'soap';
 
 // ------------------------------------------------------------------ scene
@@ -171,7 +172,6 @@ const WIRE_COLORS = [0x2d4f9e, 0xb3261e, 0xd08a00, 0x5b2a86, 0x0b7a75, 0x7a4a00]
 const WIRE_METALS = { gold: new THREE.MeshStandardMaterial({ color: new THREE.Color(1.0, 0.71, 0.29), metalness: 1, roughness: 0.18 }), steel: new THREE.MeshStandardMaterial({ color: new THREE.Color(0.56, 0.57, 0.58), metalness: 1, roughness: 0.25 }), dark: new THREE.MeshStandardMaterial({ color: new THREE.Color(0.05, 0.05, 0.06), metalness: 0.9, roughness: 0.35 }) };
 const wireMetal = () => WIRE_METALS[state.wiremetal] || WIRE_METALS.gold;
 const group = new THREE.Group(); scene.add(group);
-let surfaceGeom = null, frontMesh = null, backMesh = null, soapMesh = null, ghostMesh = null, wireGroup = null, axesGroup = null, tubeMaterials = [];
 const SERIF = '"STIX Two Text", "STIX Two Math", "Times New Roman", Times, serif';
 function makeLabel(text, x, y, z) {
   const canvas = document.createElement('canvas'), ctx = canvas.getContext('2d'), pr = 2, fs = 24;
@@ -354,60 +354,15 @@ function resetSurface() {
   if (state.auto) startTaming();
 }
 
-// ------------------------------------------------------------------ deforming the wire by hand
-// With "Drag wire" on, dragging on the wire moves the coarse point under the pointer in the plane facing the camera,
-// the points near it along the loop with it (a Gaussian falloff of width `brush` × the loop's length), and the
-// surface follows: the harmonic extension and a gentle film round.  No self-intersection check here.
-const raycaster = new THREE.Raycaster();
-let drag = null;
-function pointerRay(ev) {
-  const rect = renderer.domElement.getBoundingClientRect();
-  raycaster.setFromCamera(new THREE.Vector2(((ev.clientX - rect.left) / rect.width) * 2 - 1, -((ev.clientY - rect.top) / rect.height) * 2 + 1), camera);
-  return raycaster;
+// ------------------------------------------------------------------ the rendering: soap film or rubber sheet
+// "Soap film" and "Rubber" are the two pictures of the same surface: the film as it would look, or the two-sided
+// rubber sheet (green front, red back) that shows it is orientable.  The Display tab has the other colorings.
+function setColoring(name) {
+  state.coloring = name; $('coloring').value = name;
+  for (const [id, on] of [['soap', name === 'soap'], ['rubber', name !== 'soap']]) { $(id).classList.toggle('active', on); $(id).setAttribute('aria-pressed', String(on)); }
+  applyColoring();
 }
-function wireDown(ev) {
-  if (!state.drag || !mesh || !wire || !wireGroup) return;
-  const hits = pointerRay(ev).intersectObjects(wireGroup.children, false);
-  if (!hits.length) return;
-  const h = hits[0].point; let best = Infinity, k = -1;
-  for (let i = 0; i < wire.N; i++) { const d = Math.hypot(wire.P[3 * i] - h.x, wire.P[3 * i + 1] - h.y, wire.P[3 * i + 2] - h.z); if (d < best) { best = d; k = i; } }
-  const normal = new THREE.Vector3(); camera.getWorldDirection(normal);
-  const anchor = new THREE.Vector3(wire.P[3 * k], wire.P[3 * k + 1], wire.P[3 * k + 2]);
-  phase = 'idle'; showButtons();
-  drag = { k, plane: new THREE.Plane().setFromNormalAndCoplanarPoint(normal, anchor), anchor, P0: wire.P.slice(), pending: null, queued: false };
-  controls.enabled = false; ev.preventDefault();
-  renderer.domElement.setPointerCapture(ev.pointerId);
-}
-function wireMove(ev) {
-  if (!drag) return;
-  const target = new THREE.Vector3();
-  if (!pointerRay(ev).ray.intersectPlane(drag.plane, target)) return;
-  drag.pending = target; if (!drag.queued) { drag.queued = true; requestAnimationFrame(applyDrag); }
-}
-function applyDrag() {
-  if (!drag) return;
-  drag.queued = false; if (!drag.pending) return;
-  const d = drag.pending.clone().sub(drag.anchor), k = drag.k, loop = wire.loopOf[k], P0 = drag.P0, N = wire.N;
-  let len = 0; for (let i = 0; i < N; i++) if (wire.loopOf[i] === loop) { const n = wire.next[i]; len += Math.hypot(P0[3 * n] - P0[3 * i], P0[3 * n + 1] - P0[3 * i + 1], P0[3 * n + 2] - P0[3 * i + 2]); }
-  const sigma = Math.max(1e-6, state.brush * len), dist = new Map([[k, 0]]);
-  let i = k, s = 0; while (true) { const n = wire.next[i]; if (n === k) break; s += Math.hypot(P0[3 * n] - P0[3 * i], P0[3 * n + 1] - P0[3 * i + 1], P0[3 * n + 2] - P0[3 * i + 2]); dist.set(n, Math.min(s, len - s)); i = n; }
-  for (const [j, sj] of dist) { const w = Math.exp(-(sj * sj) / (2 * sigma * sigma)); for (let c = 0; c < 3; c++) wire.P[3 * j + c] = P0[3 * j + c] + w * d.getComponent(c); }
-  Wire.apply(wire, mesh, Minimal);
-  const l = Minimal.meanEdgeLength(mesh);
-  Minimal.relax(mesh, { dt: 4 * l * l, flips: true, tangential: state.tangential, positive: true, tol: 1e-7 });
-  updateSurfacePositions(); buildWire(); showStatus();
-}
-function wireUp(ev) {
-  if (!drag) return;
-  drag = null; controls.enabled = true; try { renderer.domElement.releasePointerCapture(ev.pointerId); } catch (e) {}
-  Wire.restart(wire); startSettling();
-}
-renderer.domElement.addEventListener('pointerdown', wireDown);
-renderer.domElement.addEventListener('pointermove', wireMove);
-renderer.domElement.addEventListener('pointerup', wireUp);
-renderer.domElement.addEventListener('pointercancel', wireUp);
-function setDrag(on) { state.drag = !!on; $('drag').classList.toggle('active', state.drag); $('drag').setAttribute('aria-pressed', String(state.drag)); renderer.domElement.style.cursor = state.drag ? 'grab' : ''; }
-function setSoap(on) { state.coloring = on ? 'soap' : (state.coloring === 'soap' ? 'sides' : state.coloring); $('coloring').value = state.coloring; $('soap').classList.toggle('active', soap()); $('soap').setAttribute('aria-pressed', String(soap())); applyColoring(); }
+function setSoap(on) { setColoring(on ? 'soap' : 'sides'); }
 
 // ------------------------------------------------------------------ text
 const T = tex => katex.renderToString(tex, { throwOnError: false, output: 'html' });
@@ -488,7 +443,7 @@ function shareLink() { return location.origin + location.pathname + location.sea
 // ------------------------------------------------------------------ UI wiring
 const EXAMPLES = [
   ['trefoil  3₁ = T(2,3)', '3_1'], ['figure-eight  4₁', '4_1'], ['cinquefoil  5₁ = T(2,5)', '5_1'], ['5₂', '5_2'], ['stevedore  6₁', '6_1'], ['6₂', '6_2'], ['6₃', '6_3'],
-  ['8₁₉ = T(3,4)', '8_19'], ['10₁₂₄ = T(3,5)', '10_124'], ['12n₂₄₂ = P(−2,3,7)  (Lehmer)', '12n242'], ['Conway knot  11n₃₄', '11n34'],
+  ['8₁₉ = T(3,4)', '8_19'], ['10₁₂₄ = T(3,5)', '10_124'], ['12n₂₄₂ = P(−2,3,7)', '12n242'], ['Conway knot  11n₃₄', '11n34'],
   ['Hopf link', 'hopf'], ['Whitehead link', 'whitehead'], ['Borromean rings', 'borromean'], ['T(4,5)', 'T(4,5)'], ['T(2,7)', 'T(2,7)'], ['T(3,6)  (3 components)', 'T(3,6)'],
   ['a 4-strand braid', '1 2 3 -1 2 -3 1 2'], ['unknot, one disk', '()'],
 ];
@@ -497,8 +452,8 @@ $('examples').addEventListener('change', e => { if (e.target.value) build(e.targ
 $('build').addEventListener('click', () => build($('input').value));
 $('input').addEventListener('keydown', e => { if (e.key === 'Enter') build($('input').value); });
 $('tame').addEventListener('click', () => { if (phase === 'taming') { phase = 'idle'; showButtons(); showStatus(); } else startTaming(); });
-$('drag').addEventListener('click', () => setDrag(!state.drag));
-$('soap').addEventListener('click', () => setSoap(!soap()));
+$('soap').addEventListener('click', () => setColoring('soap'));
+$('rubber').addEventListener('click', () => setColoring('sides'));
 $('reset-surface').addEventListener('click', resetSurface);
 const drawer = $('drawer'), tabs = [...drawer.querySelectorAll('.tab')];
 let openSection = null;
@@ -529,12 +484,12 @@ $('alpha').value = state.alpha; $('alpha').addEventListener('change', e => { sta
 bindRange('kh', 'kh', v => Math.pow(10, v).toPrecision(2), () => {});
 bindRange('dclose', 'dclose', v => v.toFixed(2), () => {});
 bindRange('maxsteps', 'maxsteps', v => v, () => {});
-bindRange('brush', 'brush', v => v.toFixed(2), () => {});
 bindRange('every', 'every', v => v, () => { if (settle) settle.every = state.every; });
 bindRange('tangential', 'tangential', v => v.toFixed(2), () => { if (settle) settle.tangential = state.tangential; });
 bindRange('perframe', 'perframe', v => v, () => {});
 bindRange('stop', 'stop', v => '10^' + v, () => {});
-$('coloring').value = state.coloring; $('coloring').addEventListener('change', e => { state.coloring = e.target.value; $('soap').classList.toggle('active', soap()); $('soap').setAttribute('aria-pressed', String(soap())); applyColoring(); });
+$('coloring').addEventListener('change', e => setColoring(e.target.value));
+setColoring(state.coloring);
 bindRange('opacity', 'opacity', v => v.toFixed(2), applyOpacity);
 bindCheck('wireframe', 'wireframe', applyOpacity);
 bindRange('soapmin', 'soapmin', v => v, kind => { if (kind === 'change' && soap()) computeThickness(); });
@@ -552,5 +507,5 @@ $('share').addEventListener('click', async () => { const url = shareLink(); try 
 setTimeout(() => { $('hint').hidden = true; }, 9000);
 window.SEIFERT_DEBUG = { state, get mesh() { return mesh; }, get wire() { return wire; }, get phase() { return phase; }, build, startTaming, startSettling, setSoap, render: () => renderer.render(scene, camera), canvas: renderer.domElement, Seifert, Minimal, Wire };
 const initial = decodeURIComponent((location.hash || '').slice(1));
-build(initial || '3_1');
+build(initial || '12n242');
 })();

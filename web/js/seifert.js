@@ -19,7 +19,7 @@ const SUP = { '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4', '⁵': '5
 const ALIASES = {
   unknot: 'K0_1', trefoil: 'K3_1', 'figure-eight': 'K4_1', 'figure eight': 'K4_1', figureeight: 'K4_1', cinquefoil: 'K5_1',
   'three-twist': 'K5_2', 'three twist': 'K5_2', stevedore: 'K6_1', 'miller institute': 'K6_2', conway: 'K11n_34',
-  'kinoshita-terasaka': 'K11n_42', 'kinoshita terasaka': 'K11n_42', lehmer: 'K12n_242', 'pretzel(-2,3,7)': 'K12n_242',
+  'kinoshita-terasaka': 'K11n_42', 'kinoshita terasaka': 'K11n_42', 'pretzel(-2,3,7)': 'K12n_242',
   'p(-2,3,7)': 'K12n_242', '(-2,3,7)': 'K12n_242', hopf: 'L2a1_1', whitehead: 'L5a1', borromean: 'L6a4', solomon: 'L4a1_1',
 };
 Seifert.ALIASES = ALIASES;

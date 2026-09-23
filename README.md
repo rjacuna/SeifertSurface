@@ -37,18 +37,19 @@ python3 -m http.server -d ~/Projects/SeifertSurface/web 8766      # then http://
 
 The web app takes a braid word (`1 2 -1 2`, `s1 s2 s1^-1 s2`, `σ₁σ₂σ₁⁻¹σ₂`, `abAb`, `(1 2)^5`), a torus link `T(p, q)`,
 or a name from the tables (`3_1`, `12n242`, `11n_34`, `L6a4`, `L2a1{1}`, and the aliases `trefoil`, `figure-eight`,
-`hopf`, `whitehead`, `borromean`, `lehmer`). The info line gives the braid, the strands, crossings and components,
+`hopf`, `whitehead`, `borromean`, `p(-2,3,7)`). It opens on the (−2, 3, 7)-pretzel knot. The info line gives the
+braid, the strands, crossings and components,
 `χ` and the genus of the surface, `Δ(t)`, `det`, `σ`, and whether the surface has the knot's genus (from KnotInfo, or
 from `deg Δ = 2g`). On Build the wire is tamed and the film settled, a few seconds of animation; the status shows
 the phase, the area, the root mean square of the discrete mean curvature `|H|` over the interior (the residual of the
 equation), the vertex count and the wire's growth. **Tame wire** runs the taming again from the wire as it is (for
-after bending it), **Drag wire** lets one bend it, **Soap film** switches the rendering, **Reset** goes back to the
+after bending it), **Soap film** and **Rubber** are the two pictures of the surface, **Reset** goes back to the
 scaffold and starts over. The drawer has four tabs: **Surface** (the scaffold: disk spacing, band width and bulge,
 resolution, the rounding of the wire's corners, whether to tame on build), **Wire** (weak or strong repulsion, its
-strength, the clearance between strands, the most steps, the brush for dragging), **Film** (how often to remesh,
+strength, the clearance between strands, the most steps), **Film** (how often to remesh,
 tangential smoothing, rounds per tick, when the film counts as settled), **Display** (two-sided coloring, or by disk
-and band, or by mean curvature, or the soap film with its thickness range, opacity and light; wireframe, the wire and
-its thickness, the scaffold as a ghost, axes, PNG, a shareable link `#word`).
+and band, or by mean curvature, or the soap film with its thickness range, opacity, light and the wire's metal;
+wireframe, the wire and its thickness, the scaffold as a ghost, axes, PNG, a shareable link `#word`).
 
 Conventions are Sage's: `σᵢ` is the positive crossing, so the closure of `σ₁³` is the right-handed trefoil, signature
 `−2`. The Seifert matrix is computed by the algorithm of Collins ([Col2013]) as Sage's `Link.seifert_matrix` does,
@@ -134,11 +135,12 @@ is leaving the surface's isotopy class, a handle would be lost, and the app stop
 taming (the taming stops at that step) and while settling. The surface, like theirs, is not checked for
 self-intersection; the wire is.
 
-The same machinery lets one deform the wire by hand: with **Drag wire** on, a point of the wire dragged with the
-pointer moves in the plane facing the camera, its neighbours along the loop with it (a Gaussian falloff of a chosen
-width), the surface follows, and the film settles again when the pointer is released; **Tame wire** afterwards
-relaxes the bent wire. Nothing stops a strand from being pushed through another here. Whether one tames first and
-then spans the wire, or carries the surface along as it is done here, the film at the end is the same: it depends
+Deforming the wire by hand with the pointer was tried and taken out again: the film followed the dragged wire
+correctly but did not render well while it did, and a hand drag has nothing to stop one strand from being pushed
+through another. The same carry would serve it, so it is in the plan below.
+
+Whether one tames first and then spans the wire, or carries the surface along as it is done here, the film at the
+end is the same: it depends
 only on the final wire and on the isotopy class carried along. The order matters for a wire that is not born from
 the scaffold, a parametrised or hand-drawn knot: spanning a *given* wire needs Seifert's algorithm on its projection,
 built in the wire's own geometry, which is in the plan below.
@@ -282,10 +284,11 @@ over *all* topologies at once, the boundary as a current and the problem convex,
 Hardt–Simon minimiser itself rather than the minimal surface in one isotopy class; Parks (1992) and Brakke (1995) are
 the theory of soap-film-like surfaces on knots.
 
-## Lehmer's polynomial
+## The (−2, 3, 7)-pretzel knot
 
-The (−2, 3, 7)-pretzel knot is `12n_242` in the tables, the closure of the positive 3-braid `σ₁σ₂²σ₁²σ₂⁷` (KnotInfo's
-word `1 2 2 1 1 2 2 2 2 2 2 2`), genus 5, signature −8, fibered, an L-space knot. Its Alexander polynomial is
+The knot the app opens on. It is `12n_242` in the tables, the closure of the positive 3-braid `σ₁σ₂²σ₁²σ₂⁷`
+(KnotInfo's word `1 2 2 1 1 2 2 2 2 2 2 2`), genus 5, signature −8, fibered, an L-space knot, and the one Fintushel
+and Stern used for their surgery examples. Its Alexander polynomial is
 
     Δ(t) = t¹⁰ − t⁹ + t⁷ − t⁶ + t⁵ − t⁴ + t³ − t + 1 = L(−t),
 
@@ -333,6 +336,8 @@ settles); a stress test of taming with film rounds.
 * **A surface from a Seifert matrix.** Given `V` (from `Friedl's Algorithm.ipynb`, or any `V` with `det(V − Vᵀ) = ±1`),
   a disk with `2g` bands whose twists and mutual linkings realise `V`, then the same relaxation: minimal surfaces for
   Lehmer's polynomial itself, `L(t)`, and for any Alexander polynomial one likes.
+* **Deforming the wire by hand**, properly: a drag of the wire with the film carried along the way taming carries
+  it, a check that no strand is pushed through another, and a rendering that holds up while it moves.
 * **Wires that are not the Bennequin boundary.** A torus knot on a round torus, a Fourier knot, a wire drawn by hand:
   Seifert's algorithm on a generic projection of the given wire (crossings from the polygon, Seifert circles as
   chains of its arcs, disks spanning them at staggered depths, bands at the crossings), so that the surface is built
