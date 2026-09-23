@@ -167,7 +167,9 @@ triangles, and the scaffold kinds each vertex came from. 150 kB apiece, 2.8 MB i
 and the knot is on the screen in about 50 ms instead of the ten seconds it takes to compute. Everything else is recomputed when the file is read: the boundary loops from the triangles, the coarse wire
 from those loops, the scaffold from the braid word, which is what **Reset** goes back to.
 
-The manifest records the parameters the films were made with, and a film is used only while those are the
+The manifest also maps the table names of the examples to their braid words, so that an example needs no knot
+table to find its film; the table is fetched behind the picture and fills in the knot's name and its genus when it
+arrives. The manifest records the parameters the films were made with, and a film is used only while those are the
 parameters in force; change the disk spacing, the repulsion or the clearance and the app computes the knot here
 instead, as it does for any knot that is not among the examples. The one parameter not compared is the scaffold's
 resolution, which sets the number of rim points only: the shipped mesh carries its own, having been remeshed. The

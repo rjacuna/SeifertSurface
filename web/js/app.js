@@ -386,6 +386,29 @@ const mixed = str => String(str).split('$').map((part, i) => i % 2 ? T(part) : e
 for (const el of document.querySelectorAll('.tex')) katex.render(el.textContent, el, { throwOnError: false, output: 'html' });
 function setInfo(html, cls) { const el = $('info'); el.innerHTML = html; el.className = cls || ''; }
 function setRemarks(notes) { const el = $('remarks'); el.innerHTML = notes.map(mixed).join('<br>'); el.hidden = !notes.length; }
+let buildToken = 0;
+// The info line: the braid and everything read off it, and, once the knot table has arrived, the knot's name and
+// its genus.  Called again when it does.
+function renderInfoLine(word, bd, label) {
+  const desc = [];
+  if (record) desc.push(`<b>${T(prettyName(record.name))}</b>${label ? ' = ' + esc(label) : ''}`); else if (label) desc.push(`<b>${esc(label)}</b>`);
+  desc.push(T(Seifert.wordTeX(word)) + (word.length ? ` on ${bd.n} strands` : ' (one strand)'));
+  desc.push(`${bd.c} crossing${bd.c === 1 ? '' : 's'}, ${bd.mu} component${bd.mu === 1 ? '' : 's'}`);
+  desc.push(T(`\\chi = ${bd.chi},\\ g = ${bd.genus}`));
+  if (word.length) {
+    const a = Seifert.alexander(word), sg = Seifert.signature(word);
+    desc.push(T(`\\Delta(t) = ${Seifert.alexanderTeX(a.coeffs)}`));
+    desc.push(T(`\\det = ${a.det},\\ \\sigma = ${sg.signature}`) + (sg.nullity ? mixed(` (nullity $${sg.nullity}$)`) : ''));
+    const bound = Math.ceil(a.degree / 2);
+    if (bd.mu === 1) {
+      if (record && record.genus !== undefined) desc.push(record.genus === bd.genus ? `<span class="ok">this surface has the knot's genus ${record.genus}</span>` : `knot genus ${record.genus} (KnotInfo): this surface has ${bd.genus - record.genus} extra handle${bd.genus - record.genus === 1 ? '' : 's'}`);
+      else if (bound === bd.genus) desc.push(`<span class="ok">minimal genus (${mixed('$\\deg\\Delta = 2g$')})</span>`);
+      else desc.push(mixed(`genus $\\ge ${bound}$ from $\\Delta$`));
+    }
+    if (bd.positive || bd.negative) desc.push(`${bd.positive ? 'positive' : 'negative'} braid`);
+  }
+  setInfo(desc.join(' | '));
+}
 const prettyName = name => name.replace(/^K(\d+)([an]?)_(\d+)$/, (m, a, b, c) => `${a}${b ? b : ''}_{${c}}`).replace(/^L(\d+)([an])(\d+)((?:_\d+)+)$/, (m, a, b, c, d) => `L${a}${b}${c}\\{${d.slice(1).split('_').join(',')}\\}`);
 
 // ------------------------------------------------------------------ the shipped films (data/films/, made by data/precompute.mjs)
@@ -406,6 +429,13 @@ function filmMatches(m) {
   const p = m.params;
   return p.spacing === state.spacing && p.bandWidth === state.bandwidth && p.bulge === state.bulge && p.round === state.round
       && p.alpha === state.alpha && p.K === Math.pow(10, state.kh) && p.dclose === state.dclose && p.maxsteps === state.maxsteps;
+}
+// the braid word of a shipped film under this KnotInfo name, without the knot table
+async function filmWord(name) {
+  const m = await loadFilms();
+  if (!filmMatches(m) || !m.names) return null;
+  const key = m.names[name];
+  return key ? (key === '()' ? [] : key.split(',').map(Number)) : null;
 }
 // the film for a braid word, decoded, or null
 async function fetchFilm(word) {
@@ -439,13 +469,15 @@ async function build(text, opts = {}) {
   try {
     const parsed = Seifert.parseBraid(text);
     if (parsed.error) throw new Error(parsed.error);
+    // a name is resolved from the shipped manifest when it can be, so that an example needs no knot table
     let word = parsed.word, label = parsed.label || null; record = null;
     if (parsed.name) {
-      await loadTable(); record = tableByName.get(parsed.name) || table.find(r => r.name.startsWith(parsed.name + '_')) || null;
-      if (!record) throw new Error(`no ${parsed.name} in the table (KnotInfo knots to 12 crossings, LinkInfo links to 11)`);
-      word = record.braid;
-    } else if (word.length) {
-      try { await loadTable(); record = tableByWord.get(JSON.stringify(word)) || null; } catch (e) { /* names are optional */ }
+      word = await filmWord(parsed.name);
+      if (!word) {
+        await loadTable(); record = tableByName.get(parsed.name) || table.find(r => r.name.startsWith(parsed.name + '_')) || null;
+        if (!record) throw new Error(`no ${parsed.name} in the table (KnotInfo knots to 12 crossings, LinkInfo links to 11)`);
+        word = record.braid;
+      }
     }
     const bd = Seifert.braidData(word);
     if (!bd.connected) throw new Error(`σ${[...Array(bd.n - 1).keys()].map(i => i + 1).find(i => !word.some(g => Math.abs(g) === i))} never occurs: the closed braid is split and the surface would be disconnected`);
@@ -462,25 +494,14 @@ async function build(text, opts = {}) {
       sizeRadius = Math.max(sizeRadius, wireRadius() * 1.05);
     } else initWire();
     buildSurfaceObjects(); buildGhost(); rebuildDecorations(); if (!opts.keepView) resetView();
-    // the info line
-    const desc = [];
-    if (record) desc.push(`<b>${T(prettyName(record.name))}</b>${label ? ' = ' + esc(label) : ''}`); else if (label) desc.push(`<b>${esc(label)}</b>`);
-    desc.push(T(Seifert.wordTeX(word)) + (word.length ? ` on ${bd.n} strands` : ' (one strand)'));
-    desc.push(`${bd.c} crossing${bd.c === 1 ? '' : 's'}, ${bd.mu} component${bd.mu === 1 ? '' : 's'}`);
-    desc.push(T(`\\chi = ${bd.chi},\\ g = ${bd.genus}`));
-    if (word.length) {
-      const a = Seifert.alexander(word), s = Seifert.signature(word);
-      desc.push(T(`\\Delta(t) = ${Seifert.alexanderTeX(a.coeffs)}`));
-      desc.push(T(`\\det = ${a.det},\\ \\sigma = ${s.signature}`) + (s.nullity ? mixed(` (nullity $${s.nullity}$)`) : ''));
-      const bound = Math.ceil(a.degree / 2);
-      if (bd.mu === 1) {
-        if (record && record.genus !== undefined) desc.push(record.genus === bd.genus ? `<span class="ok">this surface has the knot's genus ${record.genus}</span>` : `knot genus ${record.genus} (KnotInfo): this surface has ${bd.genus - record.genus} extra handle${bd.genus - record.genus === 1 ? '' : 's'}`);
-        else if (bound === bd.genus) desc.push(`<span class="ok">minimal genus (${mixed('$\\deg\\Delta = 2g$')})</span>`);
-        else desc.push(mixed(`genus $\\ge ${bound}$ from $\\Delta$`));
-      }
-      if (bd.positive || bd.negative) desc.push(`${bd.positive ? 'positive' : 'negative'} braid`);
-    }
-    setInfo(desc.join(' | '));
+    // the info line; the name and the knot genus come from the table, which is fetched behind the picture
+    const token = ++buildToken;
+    renderInfoLine(word, bd, label);
+    if (!record) loadTable().then(() => {
+      if (token !== buildToken || !mesh) return;
+      record = tableByWord.get(JSON.stringify(word)) || null;
+      renderInfoLine(word, bd, label);
+    }).catch(() => {});
     remarks.push(`scaffold: ${scaffold.tri.length / 3} triangles, wire of ${scaffold.loops.reduce((s, l) => s + l.length, 0)} points${state.round ? `, corners rounded at $${state.round}R$` : ''}` +
                  (film ? `; the film shipped with the app, ${film.steps} taming steps` : ''));
     if (film && film.pinched) remarks.push('the film pinched while it was computed: a handle of the surface closed, so what is drawn is not a surface of this genus');

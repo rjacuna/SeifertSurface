@@ -276,6 +276,11 @@ function turning(ws) {                                       // total turning an
     check(`films: all ${Object.keys(manifest.films).length} decode to settled films of the right topology (${(bytes / 1024 / 1024).toFixed(2)} MB)`, bad.length === 0, bad.join(' | '));
     // a film whose parameters the app has changed must not be used: the manifest records what made it
     check('films: the manifest records the parameters they were made with', ['spacing', 'bandWidth', 'bulge', 'round', 'alpha', 'K', 'dclose', 'maxsteps'].every(k => manifest.params[k] !== undefined));
+    // the names map lets the app resolve an example without the knot table; every name in it must point at a film
+    const named = Object.entries(manifest.names || {});
+    check('films: the manifest maps the table names of the examples to their films', named.length >= 12 && named.every(([, key]) => manifest.films[key]), named.length + ' names');
+    const badName = named.filter(([name]) => Seifert.tableName(name) !== name);
+    check('films: those names are the ones the app parses inputs to', badName.length === 0, badName.map(n => n[0]).join(' '));
   }
   // the format itself
   const s = { pos: Float64Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0]), tri: Uint32Array.from([0, 1, 2]), kind: Int16Array.from([0, 1, 2]), steps: 7, pinched: true, capped: false, L0: 1.5, length: 2.5, edge0: 0.25, area: 0.5 };

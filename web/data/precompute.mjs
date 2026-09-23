@@ -78,11 +78,12 @@ function compute(word) {
 const want = process.argv.slice(2), inputs = want.length ? want : EXAMPLES;
 fs.mkdirSync(out, { recursive: true });
 const manifestPath = path.join(out, 'index.json');
-const manifest = fs.existsSync(manifestPath) ? JSON.parse(fs.readFileSync(manifestPath)) : { version: Precomputed.VERSION, params: PARAMS, settle: SETTLE, films: {} };
-manifest.version = Precomputed.VERSION; manifest.params = PARAMS; manifest.settle = SETTLE;
+const manifest = fs.existsSync(manifestPath) ? JSON.parse(fs.readFileSync(manifestPath)) : { version: Precomputed.VERSION, params: PARAMS, settle: SETTLE, names: {}, films: {} };
+manifest.version = Precomputed.VERSION; manifest.params = PARAMS; manifest.settle = SETTLE; manifest.names = manifest.names || {};
 let total = 0;
 for (const input of inputs) {
-  const t0 = Date.now(), word = wordOf(input), key = Precomputed.key(word);
+  const t0 = Date.now(), word = wordOf(input), key = Precomputed.key(word), tname = Seifert.tableName(input);
+  if (tname) manifest.names[tname] = key;             // so that a name finds its film without the knot table
   const name = (input.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'unknot') + '.bin';
   const { mesh, ws, pinched, capped, rolled, rounds, area, H } = compute(word);
   const buf = Precomputed.encode({ pos: mesh.pos, tri: mesh.tri, kind: mesh.kind, steps: ws.steps, pinched, capped,
