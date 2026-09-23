@@ -14,7 +14,7 @@ const state = { spacing: 0.45, bandwidth: 1.2, bulge: 0.7, angular: isMobile ? 9
                 every: 5, tangential: 0.3, perframe: 2, stop: -7,                                // the film
                 coloring: 'soap', opacity: 1, wireframe: false, wire: true, thick: 0.02, ghost: false, axes: false,
                 soapmin: 100, soapmax: 800, soapopacity: 0.35, envbright: 1.2, wiremetal: 'gold' };
-let mesh = null, scaffold = null, wire = null, record = null, lastText = '', sizeRadius = 2;
+let mesh = null, scaffold = null, wire = null, lastText = '', sizeRadius = 2;
 let phase = 'idle', settle = null, areas = [], lastStats = null, remarks = [];   // phase: idle | taming | settling
 let surfaceGeom = null, frontMesh = null, backMesh = null, soapMesh = null, ghostMesh = null, wireGroup = null, axesGroup = null, tubeMaterials = [];
 const soap = () => state.coloring === 'soap';
@@ -352,12 +352,13 @@ function settleTick() {
   if (phase === 'idle' && soap()) computeThickness();
 }
 function setStatus(html) { $('status').innerHTML = html; }
+// only while something is happening: the taming and the settling take seconds, and a frozen-looking picture is
+// worse than a line of numbers.  A settled film says nothing.
 function showStatus() {
-  if (!mesh) { setStatus(''); return; }
-  const A = Minimal.area(mesh).toFixed(3), V = mesh.pos.length / 3;
-  if (phase === 'taming') setStatus(`taming: step ${wire.steps}, wire ×${(Wire.length(wire) / wire.L0).toFixed(2)}, area ${A}`);
-  else if (phase === 'settling') setStatus(`settling the film: round ${settle.round}${lastStats && lastStats.harmonic ? ' (harmonic)' : ''}, area ${A}`);
-  else { const H = Minimal.meanCurvature(mesh); setStatus(`settled: area ${A}, rms ${mixed('$|H|$')} ${(H.rms * mesh.params.R).toPrecision(2)}, ${V} vertices${wire && wire.steps ? `, wire ×${(Wire.length(wire) / wire.L0).toFixed(2)}` : ''}`); }
+  if (!mesh || phase === 'idle') { setStatus(''); return; }
+  const A = Minimal.area(mesh).toFixed(3);
+  if (phase === 'taming') setStatus(`taming the wire: step ${wire.steps}, ×${(Wire.length(wire) / wire.L0).toFixed(2)} long, area ${A}`);
+  else setStatus(`settling the film: round ${settle.round}${lastStats && lastStats.harmonic ? ' (harmonic)' : ''}, area ${A}`);
 }
 function showButtons() { $('tame').textContent = phase === 'taming' ? '❚❚ Pause' : '▶ Tame wire'; }
 function resetSurface() {
@@ -387,25 +388,27 @@ for (const el of document.querySelectorAll('.tex')) katex.render(el.textContent,
 function setInfo(html, cls) { const el = $('info'); el.innerHTML = html; el.className = cls || ''; }
 function setRemarks(notes) { const el = $('remarks'); el.innerHTML = notes.map(mixed).join('<br>'); el.hidden = !notes.length; }
 let buildToken = 0;
-// The info line: the braid and everything read off it, and, once the knot table has arrived, the knot's name and
-// its genus.  Called again when it does.
-function renderInfoLine(word, bd, label) {
-  const desc = [];
-  if (record) desc.push(`<b>${T(prettyName(record.name))}</b>${label ? ' = ' + esc(label) : ''}`); else if (label) desc.push(`<b>${esc(label)}</b>`);
-  desc.push(T(Seifert.wordTeX(word)) + (word.length ? ` on ${bd.n} strands` : ' (one strand)'));
-  desc.push(`${bd.c} crossing${bd.c === 1 ? '' : 's'}, ${bd.mu} component${bd.mu === 1 ? '' : 's'}`);
+// The info line: what to call the knot, then what is read off the braid.  The name is the common one if it has
+// one, else its Rolfsen tag, else the modern name of the tables; a braid word that is no knot of the tables is
+// called by the torus link it was typed as, or by the word itself.  Which of these is known can arrive late, when
+// the knot table does, and the line is rendered again then.
+function knotTitle(name, label, word) {
+  if (name) {
+    const common = Seifert.commonName(name);
+    if (common) return esc(common);
+    const tex = Seifert.rolfsenTeX(name) || Seifert.modernTeX(name);
+    if (tex) return T(tex);
+  }
+  if (label) return esc(label);
+  return T(Seifert.wordTeX(word));
+}
+function renderInfoLine(word, bd, label, name) {
+  const desc = [`<b>${knotTitle(name, label, word)}</b>`];
   desc.push(T(`\\chi = ${bd.chi},\\ g = ${bd.genus}`));
   if (word.length) {
     const a = Seifert.alexander(word), sg = Seifert.signature(word);
     desc.push(T(`\\Delta(t) = ${Seifert.alexanderTeX(a.coeffs)}`));
     desc.push(T(`\\det = ${a.det},\\ \\sigma = ${sg.signature}`) + (sg.nullity ? mixed(` (nullity $${sg.nullity}$)`) : ''));
-    const bound = Math.ceil(a.degree / 2);
-    if (bd.mu === 1) {
-      if (record && record.genus !== undefined) desc.push(record.genus === bd.genus ? `<span class="ok">this surface has the knot's genus ${record.genus}</span>` : `knot genus ${record.genus} (KnotInfo): this surface has ${bd.genus - record.genus} extra handle${bd.genus - record.genus === 1 ? '' : 's'}`);
-      else if (bound === bd.genus) desc.push(`<span class="ok">minimal genus (${mixed('$\\deg\\Delta = 2g$')})</span>`);
-      else desc.push(mixed(`genus $\\ge ${bound}$ from $\\Delta$`));
-    }
-    if (bd.positive || bd.negative) desc.push(`${bd.positive ? 'positive' : 'negative'} braid`);
   }
   setInfo(desc.join(' | '));
 }
@@ -470,13 +473,14 @@ async function build(text, opts = {}) {
     const parsed = Seifert.parseBraid(text);
     if (parsed.error) throw new Error(parsed.error);
     // a name is resolved from the shipped manifest when it can be, so that an example needs no knot table
-    let word = parsed.word, label = parsed.label || null; record = null;
+    let word = parsed.word, label = parsed.label || null, name = parsed.name || null;
     if (parsed.name) {
       word = await filmWord(parsed.name);
       if (!word) {
-        await loadTable(); record = tableByName.get(parsed.name) || table.find(r => r.name.startsWith(parsed.name + '_')) || null;
-        if (!record) throw new Error(`no ${parsed.name} in the table (KnotInfo knots to 12 crossings, LinkInfo links to 11)`);
-        word = record.braid;
+        await loadTable();
+        const rec = tableByName.get(parsed.name) || table.find(r => r.name.startsWith(parsed.name + '_')) || null;
+        if (!rec) throw new Error(`no ${parsed.name} in the table (KnotInfo knots to 12 crossings, LinkInfo links to 11)`);
+        word = rec.braid; name = rec.name;
       }
     }
     const bd = Seifert.braidData(word);
@@ -494,13 +498,13 @@ async function build(text, opts = {}) {
       sizeRadius = Math.max(sizeRadius, wireRadius() * 1.05);
     } else initWire();
     buildSurfaceObjects(); buildGhost(); rebuildDecorations(); if (!opts.keepView) resetView();
-    // the info line; the name and the knot genus come from the table, which is fetched behind the picture
+    // the info line; a typed braid word gets its name from the table, which is fetched behind the picture
     const token = ++buildToken;
-    renderInfoLine(word, bd, label);
-    if (!record) loadTable().then(() => {
+    renderInfoLine(word, bd, label, name);
+    if (!name && word.length) loadTable().then(() => {
       if (token !== buildToken || !mesh) return;
-      record = tableByWord.get(JSON.stringify(word)) || null;
-      renderInfoLine(word, bd, label);
+      const rec = tableByWord.get(JSON.stringify(word));
+      if (rec) renderInfoLine(word, bd, label, rec.name);
     }).catch(() => {});
     remarks.push(`scaffold: ${scaffold.tri.length / 3} triangles, wire of ${scaffold.loops.reduce((s, l) => s + l.length, 0)} points${state.round ? `, corners rounded at $${state.round}R$` : ''}` +
                  (film ? `; the film shipped with the app, ${film.steps} taming steps` : ''));
@@ -508,7 +512,7 @@ async function build(text, opts = {}) {
     setRemarks(remarks); showStatus(); showButtons();
     if (!film && state.auto) startTaming();
   } catch (e) {
-    mesh = null; scaffold = null; record = null; wire = null; disposeObject(frontMesh); disposeObject(backMesh); disposeObject(soapMesh); disposeObject(ghostMesh); disposeObject(wireGroup); frontMesh = backMesh = soapMesh = ghostMesh = wireGroup = null;
+    mesh = null; scaffold = null; wire = null; disposeObject(frontMesh); disposeObject(backMesh); disposeObject(soapMesh); disposeObject(ghostMesh); disposeObject(wireGroup); frontMesh = backMesh = soapMesh = ghostMesh = wireGroup = null;
     setInfo(`<span class="err">${mixed(e.message)}</span>`, ''); showStatus();
   } finally { $('busy').hidden = true; requestRender(); }
 }

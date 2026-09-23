@@ -23,6 +23,26 @@ const ALIASES = {
   'p(-2,3,7)': 'K12n_242', '(-2,3,7)': 'K12n_242', hopf: 'L2a1_1', whitehead: 'L5a1', borromean: 'L6a4', solomon: 'L4a1_1',
 };
 Seifert.ALIASES = ALIASES;
+// What to call a knot or link, in the order one would say it: its common name, else its Rolfsen tag (the knot
+// tables' own numbering, which Rolfsen's tables carry to ten crossings), else the modern name of the
+// Hoste-Thistlethwaite tables.  A link's orientation indices are not part of its common name.
+const COMMON = {
+  K0_1: 'unknot', K3_1: 'trefoil', K4_1: 'figure-eight knot', K5_1: 'cinquefoil', K5_2: 'three-twist knot',
+  K6_1: 'stevedore knot', K6_2: 'Miller Institute knot', K7_4: 'endless knot', K8_18: 'carrick bend',
+  K11n_34: 'Conway knot', K11n_42: 'Kinoshita–Terasaka knot', K12n_242: '(−2, 3, 7)-pretzel knot',
+  L2a1: 'Hopf link', L4a1: "Solomon's link", L5a1: 'Whitehead link', L6a4: 'Borromean rings',
+};
+Seifert.commonName = name => COMMON[name] || COMMON[String(name).replace(/(_\d+)+$/, '')] || null;
+// the Rolfsen tag as TeX, for the knots that have one (to ten crossings, where the tables need no a/n letter)
+Seifert.rolfsenTeX = name => { const m = /^K(\d{1,2})_(\d+)$/.exec(name || ''); return m && +m[1] <= 10 ? `${m[1]}_{${m[2]}}` : null; };
+// the modern name as TeX: 11n_{34}, L6a4\{0,0\}
+Seifert.modernTeX = name => {
+  let m = /^K(\d+)([an]?)_(\d+)$/.exec(name || '');
+  if (m) return `${m[1]}${m[2]}_{${m[3]}}`;
+  m = /^L(\d+)([an])(\d+)((?:_\d+)*)$/.exec(name || '');
+  if (m) return `L${m[1]}${m[2]}${m[3]}` + (m[4] ? `\\{${m[4].slice(1).split('_').join(',')}\\}` : '');
+  return null;
+};
 // KnotInfo names: knots K3_1, K11n_34, K12a_5; LinkInfo names L2a1_0, L6a4_1_0 (one orientation index per component
 // after the first).  Accepts 3_1, 3-1, 11n34, 12n_242, L6a4, L6a4{1,0}, L6a4_1_0; a link without indices is returned
 // bare (L6a4) and the app takes the table's first entry for it.

@@ -40,14 +40,15 @@ python3 -m http.server -d ~/Projects/SeifertSurface/web 8766      # then http://
 
 The web app takes a braid word (`1 2 -1 2`, `s1 s2 s1^-1 s2`, `σ₁σ₂σ₁⁻¹σ₂`, `abAb`, `(1 2)^5`), a torus link `T(p, q)`,
 or a name from the tables (`3_1`, `12n242`, `11n_34`, `L6a4`, `L2a1{1}`, and the aliases `trefoil`, `figure-eight`,
-`hopf`, `whitehead`, `borromean`, `p(-2,3,7)`). It opens on the (−2, 3, 7)-pretzel knot. The info line gives the
-braid, the strands, crossings and components,
-`χ` and the genus of the surface, `Δ(t)`, `det`, `σ`, and whether the surface has the knot's genus (from KnotInfo, or
-from `deg Δ = 2g`). The examples appear at once, their films having been computed in advance and shipped (below);
+`hopf`, `whitehead`, `borromean`, `p(-2,3,7)`). It opens on the (−2, 3, 7)-pretzel knot. The info line names the
+knot and gives what is read off the braid: `χ` and the genus of the surface, `Δ(t)`, `det`, `σ`. The name is the
+common one where a knot has one (trefoil, Hopf link, Conway knot, Borromean rings), else its Rolfsen tag (`8₁₉`,
+which the tables carry to ten crossings), else the modern name of the Hoste–Thistlethwaite tables (`12n₂₄₂`,
+`L6a4{0,0}`); a braid word that is no knot of the tables is called by the torus link it was typed as, or by the
+word itself. The examples appear at once, their films having been computed in advance and shipped (below);
 anything else is tamed and settled in the browser, a few seconds of animation, and so is an example once a setting
-is changed. The status shows
-the phase, the area, the root mean square of the discrete mean curvature `|H|` over the interior (the residual of the
-equation), the vertex count and the wire's growth. **Tame wire** runs the taming again from the wire as it is (for
+is changed. While that runs, a line beside the buttons says what is happening and how far it has got; a settled film
+says nothing. **Tame wire** runs the taming again from the wire as it is (for
 after bending it), **Soap film** and **Rubber** are the two pictures of the surface, **Reset** goes back to the
 scaffold and starts over. The drawer has four tabs: **Surface** (the scaffold: disk spacing, band width and bulge,
 resolution, the rounding of the wire's corners, whether to tame on build), **Wire** (weak or strong repulsion, its

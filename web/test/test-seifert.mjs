@@ -228,6 +228,20 @@ function turning(ws) {                                       // total turning an
   check('stress: 600 wire steps with film rounds keep the meshes manifold and oriented', ok, detail);
 }
 
+// ---- what a knot is called ----
+{
+  const cases = [['K3_1', 'trefoil'], ['K4_1', 'figure-eight knot'], ['K12n_242', '(−2, 3, 7)-pretzel knot'],
+                 ['L2a1_1', 'Hopf link'], ['L6a4_0_0', 'Borromean rings'], ['L5a1', 'Whitehead link'], ['K11n_34', 'Conway knot']];
+  check('names: the common ones, orientation indices and all', cases.every(([n, c]) => Seifert.commonName(n) === c), cases.filter(([n, c]) => Seifert.commonName(n) !== c).map(c => c[0]).join(' '));
+  check('names: none invented for the unnamed', [Seifert.commonName('K7_2'), Seifert.commonName('K11a_1'), Seifert.commonName('K10_124')].every(v => v === null));
+  check('names: Rolfsen tags to ten crossings only', Seifert.rolfsenTeX('K3_1') === '3_{1}' && Seifert.rolfsenTeX('K10_124') === '10_{124}' && Seifert.rolfsenTeX('K11n_34') === null && Seifert.rolfsenTeX('K11a_1') === null && Seifert.rolfsenTeX('L6a4_0') === null);
+  check('names: the modern ones for knots and links', Seifert.modernTeX('K12n_242') === '12n_{242}' && Seifert.modernTeX('K11a_1') === '11a_{1}' && Seifert.modernTeX('L6a4_0_0') === 'L6a4\\{0,0\\}' && Seifert.modernTeX('L5a1') === 'L5a1');
+  // every name the table can produce is displayable one way or another
+  const table = JSON.parse(fs.readFileSync(new URL('../data/knots.json', import.meta.url)));
+  const unnameable = table.filter(r => !Seifert.commonName(r.name) && !Seifert.rolfsenTeX(r.name) && !Seifert.modernTeX(r.name));
+  check(`names: all ${table.length} table entries have a name to show`, unnameable.length === 0, unnameable.slice(0, 5).map(r => r.name).join(' '));
+}
+
 // ---- the shipped films (web/data/films, made by web/data/precompute.mjs) ----
 {
   const dir = new URL('../data/films/', import.meta.url);
