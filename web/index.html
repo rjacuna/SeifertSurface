@@ -43,10 +43,10 @@
     </section>
     <section id="section-wire" hidden>
       <h3>Taming the wire</h3>
-      <p class="help">Scharein's KnotPlot forces, as van Wijk and Cohen use them: each point of the wire is pulled by its two neighbours (<span class="tex">F_a = H\,r^{1+\beta}</span>) and pushed by every other point (<span class="tex">F_r = K\,r^{-(2+\alpha)}</span>), damped, and a move that would bring a strand within reach of another is refused, so the knot type cannot change. The film follows. The wire grows while it relaxes.</p>
+      <p class="help">Scharein's KnotPlot forces, as van Wijk and Cohen use them: each point of the wire is pulled by its two neighbours (<span class="tex">F_a = H\,r^{1+\beta}</span>) and pushed by every other point (<span class="tex">F_r = K\,r^{-(2+\alpha)}</span>), damped, and a move that would take a strand through another is refused, so the knot type cannot change. What is tamed is a fat knot, a solid torus that is never shown and has no film: the forces act across the gaps between its surfaces, so wherever two strands pass they are a tube's diameter apart and more. The wire, a thin knot inside it, follows its core, and the film follows the wire. The knot grows while it relaxes.</p>
       <label>Repulsion <select id="alpha"><option value="0">weak (α = 0, inverse square)</option><option value="4">strong (α = 4)</option></select></label>
       <label title="K/H, the repulsion relative to the springs">Repulsion strength <span class="val" id="v-kh"></span><input id="kh" type="range" min="-1" max="1" step="0.1"></label>
-      <label title="Strands may not come closer than this many spacings of the coarse wire">Clearance (× spacing) <span class="val" id="v-dclose"></span><input id="dclose" type="range" min="0.5" max="4" step="0.25"></label>
+      <label title="The radius of the fat knot, the invisible solid torus that is tamed: strands are at least twice this apart where they cross. Changing it tames the knot again.">Separation (tube radius × R) <span class="val" id="v-radius"></span><input id="radius" type="range" min="0.2" max="0.6" step="0.05"></label>
       <label title="A cycle stops when the energy has stopped falling, or here">Steps at most <span class="val" id="v-maxsteps"></span><input id="maxsteps" type="range" min="200" max="5000" step="100"></label>
     </section>
     <section id="section-flow" hidden>
@@ -68,7 +68,7 @@
       <label>Thickest (nm) <span class="val" id="v-soapmax"></span><input id="soapmax" type="range" min="200" max="1500" step="10"></label>
       <label title="How much of the background the film hides face-on; it hides more at grazing angles">Film opacity <span class="val" id="v-soapopacity"></span><input id="soapopacity" type="range" min="0" max="1" step="0.05"></label>
       <label>Environment light <span class="val" id="v-envbright"></span><input id="envbright" type="range" min="0.2" max="3" step="0.1"></label>
-      <label>Wire <select id="wiremetal"><option value="gold">gold</option><option value="steel">steel</option><option value="dark">dark metal</option></select></label>
+      <label title="String is cotton twine over the wire; the film is still attached to the wire inside it">Wire <select id="wiremetal"><option value="gold">gold</option><option value="aluminum">polished aluminum</option><option value="steel">steel</option><option value="dark">dark metal</option><option value="string">string (over the wire)</option></select></label>
       <h3>Show</h3>
       <label>The wire (the knot) <input id="wire" type="checkbox"></label>
       <label>Wire thickness (× radius) <span class="val" id="v-thick"></span><input id="thick" type="range" min="0.005" max="0.06" step="0.005"></label>

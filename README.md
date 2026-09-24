@@ -27,7 +27,7 @@ python3 -m http.server -d ~/Projects/SeifertSurface/web 8766      # then http://
 | `web/index.html` | the page |
 | `web/js/seifert.js` | braid words, the closed braid, the Bennequin surface as a triangle mesh, the Seifert matrix, `Δ(t)`, signature |
 | `web/js/minimal.js` | discrete minimal surfaces: cotangent Laplacian, conjugate gradients, the harmonic step and mean curvature flow, the harmonic extension that carries the surface with the wire, Delaunay flips, tangential smoothing, isotropic remeshing, the settling schedule with pinch detection, diagnostics, linking numbers |
-| `web/js/wire.js` | taming the wire: Scharein's KnotPlot relaxation of a coarse copy of the boundary loops (springs, repulsion, damped Euler, strands kept apart), the mesh boundary interpolated from it, the carry of the surface |
+| `web/js/wire.js` | taming the wire: Scharein's KnotPlot relaxation of a coarse copy of the boundary loops (springs, repulsion, damped Euler, the wire the core of a tube that keeps the strands apart), the mesh boundary interpolated from it, the carry of the surface |
 | `web/js/precomputed.js` | the shipped films: the binary format, and installing one into a mesh |
 | `web/js/app.js` | viewer and UI |
 | `web/js/vendor/` | three.js r128, OrbitControls, KaTeX 0.16.11 (licenses alongside) |
@@ -36,7 +36,7 @@ python3 -m http.server -d ~/Projects/SeifertSurface/web 8766      # then http://
 | `web/data/braid.sage` | `sage web/data/braid.sage K12n242` (or a PD code, or `DT:[...]`): a braid word for any knot, by SnapPy |
 | `web/data/films/` | the examples' films, computed once and shipped, with `index.json` |
 | `web/data/precompute.mjs` | `node web/data/precompute.mjs`: recomputes them |
-| `web/test/test-seifert.mjs` | `node web/test/test-seifert.mjs`: 206 checks against Sage's values in `vectors.json` (made by `make_vectors.sage`), plus the mesh, the wire, the solver and the whole pipeline |
+| `web/test/test-seifert.mjs` | `node web/test/test-seifert.mjs`: 228 checks against Sage's values in `vectors.json` (made by `make_vectors.sage`), plus the mesh, the wire, the solver and the whole pipeline |
 
 The web app takes a braid word (`1 2 -1 2`, `s1 s2 s1^-1 s2`, `σ₁σ₂σ₁⁻¹σ₂`, `abAb`, `(1 2)^5`), a torus link `T(p, q)`,
 or a name from the tables (`3_1`, `12n242`, `11n_34`, `L6a4`, `L2a1{1}`, and the aliases `trefoil`, `figure-eight`,
@@ -53,9 +53,11 @@ says nothing. **Tame wire** runs the taming again from the wire as it is (for
 after bending it), **Soap film** and **Rubber** are the two pictures of the surface, **Reset** goes back to the
 scaffold and starts over. The drawer has four tabs: **Surface** (the scaffold: disk spacing, band width and bulge,
 resolution, the rounding of the wire's corners, whether to tame on build), **Wire** (weak or strong repulsion, its
-strength, the clearance between strands, the most steps), **Film** (how often to remesh,
+strength, the separation of the strands, which is the radius of the tube around the wire and tames it again when
+changed, the most steps), **Film** (how often to remesh,
 tangential smoothing, rounds per tick, when the film counts as settled), **Display** (two-sided coloring, or by disk
-and band, or by mean curvature, or the soap film with its thickness range, opacity, light and the wire's metal;
+and band, or by mean curvature, or the soap film with its thickness range, opacity, light and what the wire is: gold,
+polished aluminum, steel, dark metal, or string;
 wireframe, the wire and its thickness, the scaffold as a ghost, axes, PNG, a shareable link `#word`).
 
 Conventions are Sage's: `σᵢ` is the positive crossing, so the closure of `σ₁³` is the right-handed trefoil, signature
@@ -115,12 +117,46 @@ Two things are done differently. The forces cost `N²`, and the mesh boundary ha
 so the dynamics runs on a coarse copy of each loop, resampled at equal arclength one tenth of a radius apart, and the
 mesh boundary is interpolated back from it by a Catmull–Rom spline at equal arclength, its first point anchored at
 the point of the new curve nearest to where it was (the coarse points slide along the loop as they relax, and the
-mesh boundary must not slide with them, or the surface next to it is sheared without end). And KnotPlot's `d_close`
-is a fraction of the spacing; here it is two spacings: a film between two strands closer than a few mesh edges
-cannot be resolved, and pinches. With the original value the pretzel knot's wire brought two strands within two
-thirds of a spacing and the film between them closed a handle.
+mesh boundary must not slide with them, or the surface next to it is sheared without end).
 
-The surface is not given springs of its own, as theirs is. Whenever the coarse wire has moved half a spacing, the
+And there are two knots. A film between two strands closer than a few mesh edges cannot be resolved, and pinches,
+so the strands must be kept apart, and KnotPlot's `d_close` alone does not do it well. Set to two spacings, as it
+was here at first, it left strands jammed at exactly that distance, 0.14 to 0.19 apart on a knot seven across: a
+point that would come closer is stopped dead, so a strand pressed against another cannot slide off it, and it sat
+in a small clasp, hooked round the other strand, with the film making a bubble in it (one crossing of 5₂, most of
+the pretzel knot's). So what is tamed is a **fat knot**: a solid torus of radius `r` (**Separation** in the Wire
+tab, `0.25 R` by default), never drawn and with no surface, whose core is the coarse polygon. KnotPlot's forces act
+on the solid torus: two of its points repel across the gap between their cross-sections, `F_r = K g^{−(2+α)}` with
+`g` the core distance less what the tube takes up between them, its diameter `2r` for two strands, and `(2/π)s` for
+two points `s` apart along one strand, up to `2r` at `s = πr`; a tube bent at its own radius leaves exactly that
+(Jordan's inequality, `sin x ≥ 2x/π`), so the gap stays positive on any curve the tube can follow. The repulsion
+grows without bound as two surfaces meet, so a strand pressed against another is pushed off it rather than stopped,
+and every crossing is prescribed its separation: at least `2r`, plus the gap KnotPlot's balance leaves between the
+surfaces. With `r = 0.25` the crossings of 5₂ end 0.78 to 0.85 apart and the pretzel knot's 0.72 to 0.80, about a
+fifth of the knot's radius; with `r = 0.5`, 1.5 and 1.3 to 1.55, a third. With `r` near zero this is plain KnotPlot,
+and the strands jam (0.10 and 0.15). Below `r = 0.2` the tube is one or two coarse points across, too thin for the
+dynamics to resolve, and films pinch or crumple; the slider starts there. `d_close` is kept at KnotPlot's `0.5 r_a`,
+where its only job is Scharein's: no strand passes through another.
+
+The **thin knot** is the wire: the boundary of the mesh, drawn, spanned by the film. It lies inside the fat knot and
+follows its core. The fat knot runs ahead on its own clock, and each time its core has moved half a spacing it is
+recorded; the thin knot goes through the records one at a time, as fast as the film can follow. Two records are that
+close and the tube keeps the strands a diameter apart, so going from one to the next the thin knot cannot pass
+through itself. The film has no say in the fat knot: a step of the thin knot that the film cannot take is undone,
+and the thin knot stops there, but nothing moves the fat knot back. The fat knot inflates: it starts as thick as the
+wire already allows, half the closest approach of two strands, and grows to the radius set over its first 300
+steps, so that no strand is flung off another faster than the film can follow (the stacked disks of the scaffold are
+closer than `2r`, and inflated at once they tore the film of the 4-strand braid on its first step). Moving the slider
+tames the fat knot again from where the thin knot is, and the thin knot follows it out (or in): on a settled film
+raised from `r = 0.25` to `0.4`, the closest crossing of 5₂ goes from 0.94 to 1.24; of the pretzel knot, raised to
+`0.45`, from 0.72 to 1.20, never falling back more than 0.07 on the way (one clasp opening presses another for a
+moment). A shipped film's knot is rebuilt with the points and the units it was tamed with, or it would start away
+from KnotPlot's balance and grow and shuffle before doing what was asked. The thin knot is read from the mesh's own boundary loops each time, since every remeshing renumbers them:
+before, a copy was kept, the settling renumbered the mesh under it, and taming again from a settled film wrote the
+wire into the wrong vertices, tore the film and walked the wire back, so that a larger separation grew and then
+shrank again.
+
+The surface is not given springs of its own, as theirs is. Each time the thin knot moves to the next record, the
 surface is carried along as a rubber sheet: the wire's displacement is extended harmonically into the interior (the
 same Laplace solve as the film, with the displacement as boundary data and positive weights, so that no interior
 vertex moves further than the wire does, `Minimal.extend`); the mesh is remeshed to its scaffold edge length scaled
@@ -132,11 +168,11 @@ the surface tracks the film as the wire moves rather than drifting away from it 
 step must not be used while the wire moves: it pulls interior vertices onto the wire where the surface wraps a bend
 faster than any remeshing can collapse them.
 
-A tick that pinches the film is undone, and taming stops there. Taming also keeps a short history of the wires the
-film still followed, one every few ticks: if the film then cannot settle even on the wire taming stopped at, the
-history is walked back until it can, so the wire ends as far open as the film is able to follow it. The 4-strand
-braid in the menu needs this, its two components separating until the film between them closes; without the
-rollback its film is nonsense, with it the film settles at 1,098 taming steps instead of 1,748.
+A step of the thin knot that pinches the film is undone, and the thin knot stops there. Taming also keeps a short
+history of the thin knot, one every few ticks: if the film then cannot settle even on the wire it stopped at, the
+thin knot is walked back until it can, and the app says so. The 4-strand
+braid in the menu needs it: its two components separate until the film between them would close, and the thin knot
+stops where the film still holds, the wire ×2.24 long, while the fat knot tames on to its 2,500 steps.
 
 Once the wire is still the film settles (`Minimal.settleRound`): implicit mean curvature flow from a step of one
 edge length squared, doubled while a round moves no vertex more than half an edge, halved and the round undone when
@@ -145,7 +181,7 @@ once it is large, the harmonic step at the end; a vertex's mass is floored at a 
 with a tiny area moves like the others and not at infinite speed. It counts as settled when the area has stopped
 falling. If vertices bunch up that the remeshing cannot spread out again, a neck of the surface is closing: the film
 is leaving the surface's isotopy class, a handle would be lost, and the app stops there and says so, both during
-taming (the taming stops at that step) and while settling. The surface, like theirs, is not checked for
+taming (the thin knot stops at that step) and while settling. The surface, like theirs, is not checked for
 self-intersection; the wire is.
 
 Deforming the wire by hand with the pointer was tried and taken out again: the film followed the dragged wire
@@ -172,7 +208,7 @@ from those loops, the scaffold from the braid word, which is what **Reset** goes
 The manifest also maps the table names of the examples to their braid words, so that an example needs no knot
 table to find its film; the table is fetched behind the picture and fills in the knot's name and its genus when it
 arrives. The manifest records the parameters the films were made with, and a film is used only while those are the
-parameters in force; change the disk spacing, the repulsion or the clearance and the app computes the knot here
+parameters in force; change the disk spacing, the repulsion or the separation and the app computes the knot here
 instead, as it does for any knot that is not among the examples. The one parameter not compared is the scaffold's
 resolution, which sets the number of rim points only: the shipped mesh carries its own, having been remeshed. The
 tests decode every shipped film and check that it is the settled film of the knot it claims, with the right Euler
@@ -202,8 +238,15 @@ is in depth order rather than mesh order. In this mode the scene is lit in linea
 screen, as physically based rendering needs (the two-sided view keeps the plain pipeline it always had), and the
 environment is a studio: bright above, a dark floor, a warm key softbox, a cool fill, a long thin strip light. The
 wire becomes gold, a full metal whose colour is gold's measured reflectance (1.00, 0.71, 0.29 in linear light) and
-which therefore looks like gold only because it reflects that studio, its highlights and its dark floor; steel and
-dark metal are the alternatives in the Display tab. It is rasterised, not
+which therefore looks like gold only because it reflects that studio, its highlights and its dark floor. Polished
+aluminum (0.913, 0.922, 0.924, nearly a mirror), steel and dark metal are the alternatives in the Display tab, and so
+is **string**: cotton twine over the wire, which is still what the film is attached to (a string alone has no
+stiffness; the film's tension would pull it in and the film would collapse). Three plies twisted round it at a
+twine's 35° off the axis, one turn every `9ρ` for a string of radius `ρ`, drawn from one tile of a canvas texture in
+which the plies run along `u + v = const` (`u` along the tube, `v` round it), so that the pattern closes round the
+tube and repeats along it a whole number of times per loop; a ply's rounded profile, dark in the grooves, times fine
+fibres at the ply's own steeper twist, is both the colour and the relief (a bump map). It is matte, with a sheen, the
+fuzz of a fabric, and 1.6 times the wire's thickness. It is rasterised, not
 ray-traced: for an interactive viewer this is the right baseline, and the mesh can be exported to a path tracer for
 a still. The thickness range, the opacity and the light are in the Display tab.
 
@@ -370,6 +413,9 @@ settles); a stress test of taming with film rounds.
 * **A surface from a Seifert matrix.** Given `V` (from `Friedl's Algorithm.ipynb`, or any `V` with `det(V − Vᵀ) = ±1`),
   a disk with `2g` bands whose twists and mutual linkings realise `V`, then the same relaxation: minimal surfaces for
   Lehmer's polynomial itself, `L(t)`, and for any Alexander polynomial one likes.
+* **A string wrapped round the wire**, for real: the string as a solid of its own coiled round the wire, and the
+  film attached to the string, conforming to its surface where it meets it, not to the wire's axis. The string look
+  in the Display tab only draws one; the film still ends on the wire inside it.
 * **Deforming the wire by hand**, properly: a drag of the wire with the film carried along the way taming carries
   it, a check that no strand is pushed through another, and a rendering that holds up while it moves.
 * **Wires that are not the Bennequin boundary.** A torus knot on a round torus, a Fourier knot, a wire drawn by hand:

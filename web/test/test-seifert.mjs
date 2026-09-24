@@ -178,7 +178,7 @@ function turning(ws) {                                       // total turning an
   Wire.apply(ws, m, Minimal);
   check('wire: the interpolated circle is round', (() => { const F = ws.F[0]; let rmin = Infinity, rmax = 0; for (let k = 0; k < 72; k++) { const r = Math.hypot(F[3 * k], F[3 * k + 1]); rmin = Math.min(rmin, r); rmax = Math.max(rmax, r); } return (rmax - rmin) < 1e-3 * rmax; })());
 }
-{ // the trefoil wire: the energy falls, the corners go, no strand comes within d_close of another, the surface follows
+{ // the trefoil wire: the energy falls, the corners go, no strand passes through another, the tube keeps them apart, the surface follows
   const m = Seifert.buildSurface([1, 1, 1], { angular: 72 }); Minimal.prepare(m);
   const chi = Minimal.eulerCharacteristic(m), ws = Wire.init(m), turn0 = turning(ws);
   let e0 = null, e = null, monotone = true, rejected = 0;
@@ -186,7 +186,8 @@ function turning(ws) {                                       // total turning an
   Wire.apply(ws, m, Minimal);
   check('wire: the energy decreases monotonically', monotone && e < 0.8 * e0, `${e0} -> ${e}`);
   check('wire: the corners are gone', turning(ws) < 0.5 * turn0 && turning(ws) < 3, `${turn0} -> ${turning(ws)} turns`);
-  check('wire: no strand closer than it started, below d_close', Wire.clearance(ws).distance >= Math.min(2 * ws.ra, 0.9 * 1.5 * ws.ra) * 0.999, String(Wire.clearance(ws).distance / ws.ra));
+  check('wire: no strand passes through another (d_close)', Wire.clearance(ws).distance >= ws.o.guard * ws.ra * 0.999, String(Wire.clearance(ws).distance / ws.ra));
+  check('wire: the strands stay a tube diameter apart', Wire.thickness(ws).distance >= 0.95 * 2 * ws.o.radius, `${Wire.thickness(ws).distance} for a radius ${ws.o.radius}`);
   check('wire: the surface follows', m.loops[0].every((v, k) => Math.abs(m.pos[3 * v] - ws.F[0][3 * k]) + Math.abs(m.pos[3 * v + 1] - ws.F[0][3 * k + 1]) + Math.abs(m.pos[3 * v + 2] - ws.F[0][3 * k + 2]) < 1e-12));
   check('wire: the mesh boundary stays close to the coarse polygon', (() => {
     const seg = (px, py, pz, a, b) => { const P = ws.P, ux = P[3 * b] - P[3 * a], uy = P[3 * b + 1] - P[3 * a + 1], uz = P[3 * b + 2] - P[3 * a + 2], l2 = ux * ux + uy * uy + uz * uz; let t = l2 > 0 ? ((px - P[3 * a]) * ux + (py - P[3 * a + 1]) * uy + (pz - P[3 * a + 2]) * uz) / l2 : 0; t = Math.max(0, Math.min(1, t)); return Math.hypot(px - P[3 * a] - t * ux, py - P[3 * a + 1] - t * uy, pz - P[3 * a + 2] - t * uz); };
@@ -198,20 +199,35 @@ function turning(ws) {                                       // total turning an
   check('wire: the film on the tamed wire relaxes', H.rms < 0.5 && Minimal.degenerateTriangles(m, 1e-9) === 0, `rms ${H.rms}, max ${H.max}, area ${A}`);
 }
 
-{ // the pipeline: tame with the surface carried (Wire.carry), then settle the film (Minimal.settleRound) -- no pinch, a clean film
+{ // the pipeline: the fat knot tamed and the thin one following with the surface (Wire.tame, Wire.follow), then
+  // the film settled (Minimal.settleRound) -- no pinch, a clean film.  Then the separation raised and the wire tamed
+  // again from the settled film, as the slider does: the settling renumbered the mesh, and the thin knot must follow
+  // the mesh's loops as they now are
   for (const [name, word, maxSteps] of [['trefoil', [1, 1, 1], 1200], ['12n242', [1, 2, 2, 1, 1, 2, 2, 2, 2, 2, 2, 2], 1500]]) {
     const m = Seifert.buildSurface(word, { angular: 96 }); Minimal.prepare(m);
     const ws = Wire.init(m); ws.meshEdge = Minimal.meanEdgeLength(m);
     let pinched = false;
-    while (!Wire.settled(ws) && ws.steps < maxSteps) { const r = Wire.carry(ws, m, Minimal); if (r.pinched) pinched = true; }
+    Wire.begin(ws);
+    while (!Wire.caughtUp(ws)) { Wire.tame(ws, 50, maxSteps); const r = Wire.follow(ws, m, Minimal); if (r && r.pinched) { pinched = true; break; } }
     const st = Minimal.settleInit(m), boundary = m.loops.flat().map(v => [m.pos[3 * v], m.pos[3 * v + 1], m.pos[3 * v + 2]]);
     let s = null, rounds = 0;
     for (let r = 0; r < 80; r++) { s = Minimal.settleRound(m, st); rounds++; if (s.pinched) { pinched = true; break; } if (s.harmonic && s.moved < 1e-4) break; }
     const H = Minimal.meanCurvature(m);
-    check(`pipeline ${name}: the wire opened`, Wire.length(ws) / ws.L0 > 1.2, String(Wire.length(ws) / ws.L0));
+    check(`pipeline ${name}: the wire opened`, Wire.thinLength(ws) / ws.L0 > 1.2, String(Wire.thinLength(ws) / ws.L0));
+    check(`pipeline ${name}: the thin knot is the fat knot's core`, ws.thin.every((x, i) => x === ws.P[i]));
     check(`pipeline ${name}: no pinch, a settled film`, !pinched && s.harmonic && H.rms < 0.5 && Minimal.degenerateTriangles(m, 1e-9) === 0, `pinched ${pinched}, harmonic ${s.harmonic}, rounds ${rounds}, rms ${H.rms}`);
     check(`pipeline ${name}: χ and orientation kept through the remeshing`, Minimal.eulerCharacteristic(m) === m.braid.chi && Minimal.orientable(m.tri, m.pos.length / 3) && m.loops.length === m.braid.mu);
     check(`pipeline ${name}: the wire did not move while the film settled`, m.loops.flat().every((v, k) => Math.abs(m.pos[3 * v] - boundary[k][0]) + Math.abs(m.pos[3 * v + 1] - boundary[k][1]) + Math.abs(m.pos[3 * v + 2] - boundary[k][2]) < 1e-12));
+    if (name !== '12n242') continue;
+    const before = Wire.thickness(ws).distance, radius = 0.45;
+    Wire.begin(ws, { radius });
+    let stopped = false;
+    while (!Wire.caughtUp(ws)) { Wire.tame(ws, 50, maxSteps); const r = Wire.follow(ws, m, Minimal); if (r && r.pinched) { stopped = true; break; } }
+    const st2 = Minimal.settleInit(m); let s2 = null;
+    for (let r = 0; r < 120; r++) { s2 = Minimal.settleRound(m, st2); if (s2.pinched || (s2.harmonic && s2.moved < 1e-4)) break; }
+    const thin = { N: ws.N, P: ws.thin, loopOf: ws.loopOf, cLoops: ws.cLoops, ra: ws.ra, o: ws.o }, after = Wire.thickness(thin).distance;
+    check(`pipeline ${name}: a larger separation, tamed again from the settled film, holds`, !stopped && !s2.pinched && after >= 0.95 * 2 * radius && after > before,
+          `closest strands ${before.toFixed(3)} -> ${after.toFixed(3)}, stopped ${stopped}, pinched ${s2.pinched}`);
   }
 }
 { // stress: taming with a film round after every few wire steps keeps the mesh a manifold (the flips must never make an edge twice)
@@ -290,12 +306,15 @@ function turning(ws) {                                       // total turning an
         if (!entry.pinched && !(H.rms < 0.5)) why.push(`rms |H| ${H.rms.toFixed(3)}`);
         if (Math.abs(Minimal.area(mesh) - entry.area) > 1e-3 * entry.area) why.push(`area ${Minimal.area(mesh).toFixed(3)} not ${entry.area}`);
         if (!(film.length / film.L0 > 1.0)) why.push(`the wire did not grow (×${(film.length / film.L0).toFixed(2)})`);
+        // the wire is the core of the tube: no two strands closer than its diameter (a little under, the contact is soft)
+        const th = Wire.thickness(Wire.init(mesh, { radius: manifest.params.radius })).distance;
+        if (!(th >= 0.95 * 2 * manifest.params.radius)) why.push(`strands ${th.toFixed(3)} apart, under the tube's diameter ${2 * manifest.params.radius}`);
         if (why.length) bad.push(`${entry.file}: ${why.join(', ')}`);
       } catch (e) { bad.push(`${entry.file}: ${e.message}`); }
     }
     check(`films: all ${Object.keys(manifest.films).length} decode to settled films of the right topology (${(bytes / 1024 / 1024).toFixed(2)} MB)`, bad.length === 0, bad.join(' | '));
     // a film whose parameters the app has changed must not be used: the manifest records what made it
-    check('films: the manifest records the parameters they were made with', ['spacing', 'bandWidth', 'bulge', 'round', 'alpha', 'K', 'dclose', 'maxsteps'].every(k => manifest.params[k] !== undefined));
+    check('films: the manifest records the parameters they were made with', ['spacing', 'bandWidth', 'bulge', 'round', 'alpha', 'K', 'radius', 'maxsteps'].every(k => manifest.params[k] !== undefined));
     // the names map lets the app resolve an example without the knot table; every name in it must point at a film
     const named = Object.entries(manifest.names || {});
     check('films: the manifest maps the table names of the examples to their films', named.length >= 12 && named.every(([, key]) => manifest.films[key]), named.length + ' names');

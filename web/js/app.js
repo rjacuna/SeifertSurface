@@ -1,7 +1,7 @@
 /* app.js -- viewer and UI for the Seifert Surface web app.  Globals: THREE, katex, Seifert, Minimal, Wire.
    Build: the scaffold (Seifert.buildSurface), then either the film that ships with the app for this braid word
    (data/films/, see precomputed.js), or the pipeline run here: the wire tamed with the film following
-   (Wire.carry), then the film settled on the still wire (Minimal.settleRound).  Tame wire and Reset run it here in
+   (Wire.tame, the fat knot; Wire.follow, the thin one), then the film settled on the still wire (Minimal.settleRound).  Tame wire and Reset run it here in
    any case.  Two pictures: the soap film, thin-film interference from a per-vertex
    thickness, and the two-sided rubber sheet; the Display tab adds the disks and bands and the mean curvature. */
 (function () {
@@ -10,7 +10,7 @@ const $ = id => document.getElementById(id);
 const isMobile = matchMedia('(max-width: 640px)').matches || navigator.maxTouchPoints > 1;
 
 const state = { spacing: 0.45, bandwidth: 1.2, bulge: 0.7, angular: isMobile ? 96 : 144, round: 0.1, auto: true,
-                alpha: 0, kh: 0, dclose: 2, maxsteps: 2500,                                     // the wire: kh is log10 of K/H
+                alpha: 0, kh: 0, radius: 0.25, maxsteps: 2500,                                  // the wire: kh is log10 of K/H, radius the tube's
                 every: 5, tangential: 0.3, perframe: 2, stop: -7,                                // the film
                 coloring: 'soap', opacity: 1, wireframe: false, wire: true, thick: 0.02, ghost: false, axes: false,
                 soapmin: 100, soapmax: 800, soapopacity: 0.35, envbright: 1.2, wiremetal: 'gold' };
@@ -167,11 +167,43 @@ function makeSoapMaterial(side) {
 const soapMaterial = makeSoapMaterial(THREE.DoubleSide);
 const WIRE_COLORS = [0x2d4f9e, 0xb3261e, 0xd08a00, 0x5b2a86, 0x0b7a75, 0x7a4a00];
 // the wire in the soap-film picture: gold by default (its colour is the metal's reflectance, tinting the room it
-// reflects), or steel
-// measured reflectances of the metals, in linear light (gold 1.00, 0.71, 0.29; steel 0.56, 0.57, 0.58), as
-// MeshStandardMaterial takes the colour of a full metal for its F0
-const WIRE_METALS = { gold: new THREE.MeshStandardMaterial({ color: new THREE.Color(1.0, 0.71, 0.29), metalness: 1, roughness: 0.18 }), steel: new THREE.MeshStandardMaterial({ color: new THREE.Color(0.56, 0.57, 0.58), metalness: 1, roughness: 0.25 }), dark: new THREE.MeshStandardMaterial({ color: new THREE.Color(0.05, 0.05, 0.06), metalness: 0.9, roughness: 0.35 }) };
-const wireMetal = () => WIRE_METALS[state.wiremetal] || WIRE_METALS.gold;
+// reflects), polished aluminium, steel, dark metal, or cotton string over the wire
+// measured reflectances of the metals, in linear light (gold 1.00, 0.71, 0.29; aluminium 0.913, 0.922, 0.924; steel
+// 0.56, 0.57, 0.58), as MeshStandardMaterial takes the colour of a full metal for its F0
+const WIRE_METALS = { gold: new THREE.MeshStandardMaterial({ color: new THREE.Color(1.0, 0.71, 0.29), metalness: 1, roughness: 0.18 }),
+                      aluminum: new THREE.MeshStandardMaterial({ color: new THREE.Color(0.913, 0.922, 0.924), metalness: 1, roughness: 0.06 }),
+                      steel: new THREE.MeshStandardMaterial({ color: new THREE.Color(0.56, 0.57, 0.58), metalness: 1, roughness: 0.25 }),
+                      dark: new THREE.MeshStandardMaterial({ color: new THREE.Color(0.05, 0.05, 0.06), metalness: 0.9, roughness: 0.35 }) };
+// String: cotton twine over the wire, which is still what the film is attached to.  Three plies twisted round it:
+// one tile of the texture is one turn, u along the wire and v round it, and the plies run along u + v = const, so the
+// pattern closes round the tube and repeats along it.  The grey level is a ply's rounded profile, dark in the grooves
+// between plies, times fine fibres running along each ply at its own, steeper twist; it is both the colour and the
+// relief (bumpMap).  Matte, with a sheen, the fuzz of a fabric.  A twine's plies lie about 35° off its axis, so a
+// turn is 2πρ / tan 35° ≈ 9ρ long for a string of radius ρ; the string is thicker than the bare wire.
+const STRING_THICKER = 1.6, STRING_PITCH = 9, STRING_PLIES = 3;
+function makeStringTexture() {
+  const S = 256, c = document.createElement('canvas'); c.width = c.height = S;
+  const ctx = c.getContext('2d'), img = ctx.createImageData(S, S);
+  let seed = 12345; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const fibre = new Float32Array(S); for (let i = 0; i < S; i++) fibre[i] = rnd();
+  for (let i = 0; i < S; i++) fibre[i] = (fibre[i] + fibre[(i + 1) % S] + fibre[(i + S - 1) % S]) / 3;   // a little softer
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const t = STRING_PLIES * (x + y) / S, f = t - Math.floor(t);
+    const ply = Math.pow(Math.sin(Math.PI * f), 0.45);
+    const fib = fibre[((x + 3 * y) % S + S) % S];                // along x + 3y = const: periodic in x and y, steeper than the ply
+    const g = ply * (0.8 + 0.2 * fib), i = 4 * (y * S + x);
+    img.data[i] = 238 * g + 10; img.data[i + 1] = 232 * g + 9; img.data[i + 2] = 218 * g + 8; img.data[i + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(c); tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.encoding = THREE.sRGBEncoding;
+  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return tex;
+}
+const stringTexture = makeStringTexture();
+const STRING_MATERIAL = new THREE.MeshPhysicalMaterial({ color: 0xffffff, map: stringTexture, bumpMap: stringTexture, bumpScale: 1.5, roughness: 0.9, metalness: 0,
+                                                        sheen: 1, sheenRoughness: 0.5, sheenColor: new THREE.Color(0.95, 0.93, 0.9) });
+const stringWire = () => soap() && state.wiremetal === 'string';
+const wireMetal = () => stringWire() ? STRING_MATERIAL : (WIRE_METALS[state.wiremetal] || WIRE_METALS.gold);
 const group = new THREE.Group(); scene.add(group);
 const SERIF = '"STIX Two Text", "STIX Two Math", "Times New Roman", Times, serif';
 function makeLabel(text, x, y, z) {
@@ -197,13 +229,17 @@ function buildWire() {
   mesh.loops.forEach((loop, k) => {
     const pts = loop.map(v => new THREE.Vector3(mesh.pos[3 * v], mesh.pos[3 * v + 1], mesh.pos[3 * v + 2]));
     if (pts.length < 3) return;
-    const curve = new THREE.CatmullRomCurve3(pts, true, 'centripetal');
-    const tube = new THREE.TubeGeometry(curve, Math.min(1200, 2 * pts.length), state.thick, 16, true);
+    const curve = new THREE.CatmullRomCurve3(pts, true, 'centripetal'), str = stringWire(), rho = state.thick * (str ? STRING_THICKER : 1);
+    const tube = new THREE.TubeGeometry(curve, Math.min(str ? 2400 : 1200, (str ? 4 : 2) * pts.length), rho, str ? 24 : 16, true);
+    if (str) {                                                   // a whole number of turns of the plies along the loop
+      const turns = Math.max(1, Math.round(curve.getLength() / (STRING_PITCH * rho))), uv = tube.attributes.uv;
+      for (let i = 0; i < uv.count; i++) uv.setX(i, uv.getX(i) * turns);
+    }
     const mat = new THREE.MeshPhongMaterial({ color: WIRE_COLORS[k % WIRE_COLORS.length], shininess: 50, specular: new THREE.Color(0x333344) });
     tubeMaterials.push(mat);
     wireGroup.add(new THREE.Mesh(tube, soap() ? wireMetal() : mat));
   });
-  wireGroup.visible = state.wire; group.add(wireGroup);
+  wireGroup.visible = state.wire; wireGroup.userData.string = stringWire(); group.add(wireGroup);
 }
 function buildSurfaceObjects() {                                 // (re)creates the geometry: after a build, a remeshing, a reset
   disposeObject(frontMesh); disposeObject(backMesh); disposeObject(soapMesh); frontMesh = backMesh = soapMesh = null;
@@ -246,7 +282,8 @@ function applyColoring() {
   renderer.setClearColor(0xffffff, 1); scene.background = s ? envTexture : null;
   renderer.outputEncoding = s ? THREE.sRGBEncoding : THREE.LinearEncoding;   // the film and the metal are lit in linear light and encoded for the screen
   ambient.intensity = s ? 0.25 : 0.55;
-  if (wireGroup) wireGroup.children.forEach((m, k) => { m.material = s ? wireMetal() : tubeMaterials[k]; });
+  if (wireGroup && wireGroup.userData.string !== stringWire()) buildWire();     // the string is thicker: new tubes
+  else if (wireGroup) wireGroup.children.forEach((m, k) => { m.material = s ? wireMetal() : tubeMaterials[k]; });
   for (const m of [frontMaterial, backMaterial]) { m.vertexColors = vertexColors; m.needsUpdate = true; }
   frontMaterial.color.set(vertexColors ? 0xffffff : FRONT); backMaterial.color.set(vertexColors ? 0xffffff : BACK);
   if (vertexColors) {
@@ -304,35 +341,37 @@ function tick() {
   showButtons();
   if (phase !== 'idle') schedule();
 }
-function wireOptions() { return { alpha: state.alpha, K: Math.pow(10, state.kh), H: 1, dclose: state.dclose }; }
+function wireOptions() { return { alpha: state.alpha, K: Math.pow(10, state.kh), H: 1, radius: state.radius }; }
 function initWire() { wire = mesh ? Wire.init(mesh, wireOptions()) : null; if (wire) wire.meshEdge = mesh.edge0; }
 function startTaming() {
   if (!mesh || !wire) return;
-  Object.assign(wire.o, wireOptions()); Wire.restart(wire); wire.steps = 0; history = []; tameTicks = 0;
-  phase = 'taming'; remarks = remarks.filter(r => !/^taming|^the film/.test(r)); setRemarks(remarks); schedule(); showButtons();
+  Wire.begin(wire, wireOptions()); history = []; tameTicks = 0;
+  phase = 'taming'; remarks = remarks.filter(r => !/^taming|^the film|^the wire stopped/.test(r)); setRemarks(remarks); schedule(); showButtons();
 }
 function startSettling() {
   if (!mesh) return;
   settle = Minimal.settleInit(mesh, { every: state.every, tangential: state.tangential }); areas = [];
   phase = 'settling'; schedule(); showButtons();
 }
-// A history of the wires the film still followed, one every few ticks.  A tick that pinches the film is undone and
-// taming stops there; if the film then cannot settle on that wire either, the history is walked back until it can,
-// so the wire ends as far open as the film can follow it.
-const HISTORY_EVERY = 4, HISTORY_MAX = 12;
+// Each tick the fat knot tames on (Wire.tame: never drawn, no surface, and the film never moves it back) and the
+// thin knot, the wire, follows its core one record further, the surface with it (Wire.follow).  A step the film
+// cannot take is undone, and the thin knot stops there.  A history of the thin knot, one every few ticks: if the film
+// then cannot settle on the wire, the thin knot is walked back until it can.
+const HISTORY_EVERY = 4, HISTORY_MAX = 12, TAME_BUDGET = 50;
 let history = [], tameTicks = 0;
 function tameTick() {
+  Wire.tame(wire, TAME_BUDGET, state.maxsteps);
   const snap = Wire.snapshot(wire, mesh);
-  const r = Wire.carry(wire, mesh, Minimal, { tangential: state.tangential });
-  lastStats = r;
-  if (r.pinched) {
-    Wire.rollback(wire, mesh, snap, Minimal);
-    remarks.push(`taming stopped after ${wire.steps} steps: the next of them began to pinch the film, a handle of the surface closing, and was undone`);
+  const r = Wire.follow(wire, mesh, Minimal, { tangential: state.tangential });
+  if (r) lastStats = r;
+  if (r && r.pinched) {
+    remarks.push(`the wire stopped after ${wire.steps} steps of taming: the film could not follow it further, a handle of the surface closing`);
     setRemarks(remarks); buildSurfaceObjects(); buildWire(); keepInView(); startSettling(); return;
   }
-  if (tameTicks++ % HISTORY_EVERY === 0) { history.push(snap); if (history.length > HISTORY_MAX) history.shift(); }
-  buildSurfaceObjects(); buildWire(); keepInView(); showStatus();
-  if (Wire.settled(wire) || wire.steps >= state.maxsteps) startSettling();
+  if (r && tameTicks++ % HISTORY_EVERY === 0) { history.push(snap); if (history.length > HISTORY_MAX) history.shift(); }
+  if (r) { buildSurfaceObjects(); buildWire(); keepInView(); }
+  showStatus();
+  if (Wire.caughtUp(wire)) startSettling();
 }
 function settleTick() {
   for (let k = 0; k < state.perframe && phase === 'settling'; k++) {
@@ -341,7 +380,10 @@ function settleTick() {
     if (s.pinched) {
       // the film cannot settle on this wire: go back to an earlier one it could follow, and settle there instead
       const back = history.pop();
-      if (back) { Wire.rollback(wire, mesh, back, Minimal); buildSurfaceObjects(); buildWire(); startSettling(); }
+      if (back) {
+        Wire.rollback(wire, mesh, back, Minimal); buildSurfaceObjects(); buildWire(); startSettling();
+        if (!remarks.some(x => /^the film could not settle/.test(x))) { remarks.push('the film could not settle on the wire as far out as it was tamed, a handle of the surface closing, so the wire is shown back where it could'); setRemarks(remarks); }
+      }
       else { phase = 'idle'; remarks.push('the film pinches here: a handle of the surface is closing, so no film of this genus sits on this wire'); setRemarks(remarks); }
       break;
     }
@@ -357,7 +399,7 @@ function setStatus(html) { $('status').innerHTML = html; }
 function showStatus() {
   if (!mesh || phase === 'idle') { setStatus(''); return; }
   const A = Minimal.area(mesh).toFixed(3);
-  if (phase === 'taming') setStatus(`taming the wire: step ${wire.steps}, ×${(Wire.length(wire) / wire.L0).toFixed(2)} long, area ${A}`);
+  if (phase === 'taming') setStatus(`taming the wire: step ${wire.steps}, ×${(Wire.thinLength(wire) / wire.L0).toFixed(2)} long, area ${A}`);
   else setStatus(`settling the film: round ${settle.round}${lastStats && lastStats.harmonic ? ' (harmonic)' : ''}, area ${A}`);
 }
 function showButtons() { $('tame').textContent = phase === 'taming' ? '❚❚ Pause' : '▶ Tame wire'; }
@@ -365,7 +407,7 @@ function resetSurface() {
   if (!scaffold) return;
   phase = 'idle';
   mesh.pos = scaffold.pos.slice(); mesh.tri = scaffold.tri.slice(); mesh.kind = scaffold.kind.slice(); mesh.fixed = scaffold.fixed.slice(); mesh.loops = scaffold.loops.map(l => l.slice());
-  Minimal.prepare(mesh); initWire(); lastStats = null; areas = []; remarks = remarks.filter(r => !/^taming|^the film/.test(r)); setRemarks(remarks);
+  Minimal.prepare(mesh); initWire(); lastStats = null; areas = []; remarks = remarks.filter(r => !/^taming|^the film|^the wire stopped/.test(r)); setRemarks(remarks);
   sizeRadius = scaffold.sizeRadius; buildSurfaceObjects(); buildWire(); showStatus(); showButtons();
   if (state.auto) startTaming();
 }
@@ -432,7 +474,7 @@ function filmMatches(m) {
   if (!m || !m.params) return false;
   const p = m.params;
   return p.spacing === state.spacing && p.bandWidth === state.bandwidth && p.bulge === state.bulge && p.round === state.round
-      && p.alpha === state.alpha && p.K === Math.pow(10, state.kh) && p.dclose === state.dclose && p.maxsteps === state.maxsteps;
+      && p.alpha === state.alpha && p.K === Math.pow(10, state.kh) && p.radius === state.radius && p.maxsteps === state.maxsteps;
 }
 // the braid word of a shipped film under this KnotInfo name, without the knot table
 async function filmWord(name) {
@@ -495,7 +537,7 @@ async function build(text, opts = {}) {
     const film = opts.live ? null : await fetchFilm(word);     // a shipped film, if this is one of them
     if (film) {
       Precomputed.install(mesh, film, Seifert, Minimal);
-      initWire(); wire.L0 = film.L0; wire.steps = film.steps; wire.energies = [];
+      wire = Wire.init(mesh, Object.assign(wireOptions(), { L0: film.L0 })); wire.meshEdge = mesh.edge0; wire.steps = film.steps;
       sizeRadius = Math.max(sizeRadius, wireRadius() * 1.05);
     } else initWire();
     buildSurfaceObjects(); buildGhost(); rebuildDecorations(); if (!opts.keepView) resetView();
@@ -568,7 +610,7 @@ bindCheck('auto', 'auto', () => {});
 $('rebuild').addEventListener('click', () => { if (lastText) build(lastText, { keepView: true, live: true }); });
 $('alpha').value = state.alpha; $('alpha').addEventListener('change', e => { state.alpha = Number(e.target.value); });
 bindRange('kh', 'kh', v => Math.pow(10, v).toPrecision(2), () => {});
-bindRange('dclose', 'dclose', v => v.toFixed(2), () => {});
+bindRange('radius', 'radius', v => v.toFixed(2), kind => { if (kind === 'change' && mesh && wire) startTaming(); });   // the tube inflates or relaxes from the wire as it is
 bindRange('maxsteps', 'maxsteps', v => v, () => {});
 bindRange('every', 'every', v => v, () => { if (settle) settle.every = state.every; });
 bindRange('tangential', 'tangential', v => v.toFixed(2), () => { if (settle) settle.tangential = state.tangential; });
@@ -582,7 +624,7 @@ bindRange('soapmin', 'soapmin', v => v, kind => { if (kind === 'change' && soap(
 bindRange('soapmax', 'soapmax', v => v, kind => { if (kind === 'change' && soap()) computeThickness(); });
 bindRange('soapopacity', 'soapopacity', v => v.toFixed(2), applyOpacity);
 bindRange('envbright', 'envbright', v => v.toFixed(1), applyOpacity);
-$('wiremetal').value = state.wiremetal; $('wiremetal').addEventListener('change', e => { state.wiremetal = e.target.value; if (wireGroup && soap()) wireGroup.children.forEach(m => { m.material = wireMetal(); }); requestRender(); });
+$('wiremetal').value = state.wiremetal; $('wiremetal').addEventListener('change', e => { state.wiremetal = e.target.value; if (wireGroup && soap()) applyColoring(); requestRender(); });
 bindCheck('wire', 'wire', () => { if (wireGroup) wireGroup.visible = state.wire; });
 bindRange('thick', 'thick', v => v.toFixed(3), kind => { if (kind === 'change') buildWire(); });
 bindCheck('ghost', 'ghost', () => { if (ghostMesh) ghostMesh.visible = state.ghost; });

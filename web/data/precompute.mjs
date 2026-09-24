@@ -18,7 +18,7 @@ const Seifert = require('../js/seifert.js'), Minimal = require('../js/minimal.js
 const here = path.dirname(fileURLToPath(import.meta.url)), out = path.join(here, 'films');
 
 // the app's defaults (web/js/app.js `state`), and its stopping rules
-const PARAMS = { spacing: 0.45, bandWidth: 1.2, bulge: 0.7, round: 0.1, alpha: 0, K: 1, dclose: 2, maxsteps: 2500, angular: 144 };
+const PARAMS = { spacing: 0.45, bandWidth: 1.2, bulge: 0.7, round: 0.1, alpha: 0, K: 1, radius: 0.25, maxsteps: 2500, angular: 144 };
 const SETTLE = { every: 5, tangential: 0.3, stop: -7, maxRounds: 400 };
 // the inputs of the app's Examples menu
 const EXAMPLES = ['3_1', '4_1', '5_1', '5_2', '6_1', '6_2', '6_3', '7_1', '8_19', '10_124', '11n34', '12n242',
@@ -39,18 +39,20 @@ function wordOf(text) {
 function compute(word) {
   const mesh = Seifert.buildSurface(word, { spacing: PARAMS.spacing, bandWidth: PARAMS.bandWidth, bulge: PARAMS.bulge, angular: PARAMS.angular, round: PARAMS.round });
   Minimal.prepare(mesh); mesh.attrs = ['kind']; mesh.edge0 = Minimal.meanEdgeLength(mesh);
-  const ws = Wire.init(mesh, { alpha: PARAMS.alpha, K: PARAMS.K, H: 1, dclose: PARAMS.dclose });
+  const ws = Wire.init(mesh, { alpha: PARAMS.alpha, K: PARAMS.K, H: 1, radius: PARAMS.radius });
   ws.meshEdge = mesh.edge0;
-  // Taming, a tick at a time, keeping a history of the wires the film still followed (one every HISTORY ticks).
-  // A tick that pinches the film is undone and taming stops; if the film then cannot settle on that wire either,
-  // the history is walked back until it can.  The wire ends as far open as the film can follow it.
+  // Taming, a tick at a time, as the app does: the fat knot tames on (never drawn, no surface, never moved back by
+  // the film) and the thin knot, the wire, follows its core one record further with the surface.  A step the film
+  // cannot take is undone and the thin knot stops there; a history of the thin knot, one every HISTORY ticks, lets
+  // it be walked back if the film then cannot settle.
   const HISTORY = 4, history = [];
   let rolled = false, tick = 0;
-  while (!Wire.settled(ws) && ws.steps < PARAMS.maxsteps) {
-    const snap = Wire.snapshot(ws, mesh);
-    const r = Wire.carry(ws, mesh, Minimal, { tangential: SETTLE.tangential });
-    if (r.pinched) { Wire.rollback(ws, mesh, snap, Minimal); rolled = true; break; }
-    if (tick++ % HISTORY === 0) { history.push(snap); if (history.length > 12) history.shift(); }
+  Wire.begin(ws);
+  while (!Wire.caughtUp(ws)) {
+    Wire.tame(ws, 50, PARAMS.maxsteps);
+    const snap = Wire.snapshot(ws, mesh), r = Wire.follow(ws, mesh, Minimal, { tangential: SETTLE.tangential });
+    if (r && r.pinched) { rolled = true; break; }
+    if (r && tick++ % HISTORY === 0) { history.push(snap); if (history.length > 12) history.shift(); }
   }
   const capped = !rolled && ws.steps >= PARAMS.maxsteps;
   function settleHere() {
@@ -87,14 +89,14 @@ for (const input of inputs) {
   const name = (input.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'unknot') + '.bin';
   const { mesh, ws, pinched, capped, rolled, rounds, area, H } = compute(word);
   const buf = Precomputed.encode({ pos: mesh.pos, tri: mesh.tri, kind: mesh.kind, steps: ws.steps, pinched, capped,
-                                   L0: ws.L0, length: Wire.length(ws), edge0: mesh.edge0, area });
+                                   L0: ws.L0, length: Wire.thinLength(ws), edge0: mesh.edge0, area });
   fs.writeFileSync(path.join(out, name), Buffer.from(buf));
   manifest.films[key] = { file: name, bytes: buf.byteLength, V: mesh.pos.length / 3, F: mesh.tri.length / 3, steps: ws.steps,
-                          growth: +(Wire.length(ws) / ws.L0).toFixed(4), area: +area.toFixed(4), rms: +H.rms.toFixed(4),
+                          growth: +(Wire.thinLength(ws) / ws.L0).toFixed(4), area: +area.toFixed(4), rms: +H.rms.toFixed(4),
                           chi: Minimal.eulerCharacteristic(mesh), loops: mesh.loops.length, pinched, capped, inputs: [input] };
   total += buf.byteLength;
   console.log(`${input.padEnd(18)} ${String(mesh.pos.length / 3).padStart(6)} vertices  ${(buf.byteLength / 1024).toFixed(0).padStart(4)} kB  ` +
-              `${ws.steps} taming steps, ${rounds} film rounds, wire ×${(Wire.length(ws) / ws.L0).toFixed(2)}, area ${area.toFixed(3)}, rms |H| ${H.rms.toFixed(3)}` +
+              `${ws.steps} taming steps, ${rounds} film rounds, wire ×${(Wire.thinLength(ws) / ws.L0).toFixed(2)}, area ${area.toFixed(3)}, rms |H| ${H.rms.toFixed(3)}` +
               `${pinched ? ', PINCHED' : ''}${rolled ? ', taming rolled back at a pinch' : ''}${capped ? ', taming capped' : ''}  (${((Date.now() - t0) / 1000).toFixed(1)} s)`);
 }
 // a full run owns the directory: films no longer listed are stale and go
